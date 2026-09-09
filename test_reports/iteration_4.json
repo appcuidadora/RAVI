@@ -1,0 +1,25 @@
+{
+  "summary": "Iteração 4 — validação do fix da inscrição do app RAVI_API na WABA + regressão do webhook Meta. Rodei pytest com 11/11 PASS (4 novos em test_waba_subscription.py + 7 em test_webhook_meta.py). A verificação central passou: GET /v25.0/1074967048515451/subscribed_apps agora retorna o app RAVI_API (id 4453203408280441) usando o access_token real salvo em whatsapp_connections. Regressão do webhook (verify token, inbound, idempotência, phone_number_id desconhecido, logs) 100% verde. Backend hot-reloadou sem tracebacks. GET /api/whatsapp/status retorna connection.status='connected' com phone_number_id=1266842309849495.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_waba_subscription.py",
+    "/app/backend/tests/test_webhook_meta.py",
+    "/app/test_reports/pytest/iter4.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fix confirmado no lado do backend: whatsapp_routes.whatsapp_connect_test chama subscribe_waba(waba_id, token) e loga warning se falhar (linha 101-102). Bem alinhado com o RCA.",
+    "Verificação externa via Graph API comprovou que RAVI_API (4453203408280441) está agora listado em subscribed_apps da WABA 1074967048515451 — a Meta agora entregará eventos.",
+    "Sugestão menor (não bloqueante): se subscribe_waba falhar, hoje só loga warning e a conexão prossegue como 'connected'. Considerar retornar aviso ao frontend (ex.: campo 'subscription_warning' no response) para o usuário saber que precisa reinscrever manualmente. Não é bug, é UX.",
+    "test_ravi.py::test_status_shows_meta_pending continua obsoleto (identificado na iter3). Não impacta este fix, mas convém alinhar."
+  ],
+  "updated_files": ["/app/backend/tests/test_waba_subscription.py"],
+  "success_rate": {"backend": "100% (11/11)"},
+  "test_credentials": "admin: construcaovilanova@gmail.com / Ravi@2026 (via /app/memory/test_credentials.md)",
+  "seed_data_creation": "Nenhum. Testes reusam Carlos Eduardo (demo) e access_token já persistido em whatsapp_connections.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Fix da subscription validado externamente via Graph API. O access_token de teste da Meta é válido até ~10/09/2026 01:38 UTC. Se o token expirar, test_subscribed_apps_lists_ravi_api falhará com 401 e será necessário rotacionar o token no MongoDB (whatsapp_connections.access_token) via /api/whatsapp/connect-test. Nenhuma outra pendência do RCA.",
+  "rca of the issue": "Bug do usuário (2ª vez): mensagens para +1 555-665-3479 não recebiam resposta do RAVI. Causa raiz externa: o app RAVI_API não estava inscrito na WABA 1074967048515451, então a Meta não entregava webhooks (mesmo com verify OK). Fix: (a) POST manual /{WABA}/subscribed_apps já feito pelo main agent — validado agora via GET; (b) whatsapp_connect_test agora chama subscribe_waba automaticamente para futuras conexões. Reprodução: GET https://graph.facebook.com/v25.0/1074967048515451/subscribed_apps com o token do usuário — deve conter {id: 4453203408280441, link: RAVI_API}. Validação: PASS."
+}

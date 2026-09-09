@@ -98,6 +98,8 @@ async def whatsapp_connect_test(data: ConnectTestIn, user: dict = Depends(requir
     display = await fetch_phone_display(phone_id, data.access_token.strip())
     if not display:
         raise HTTPException(400, "Token inválido ou expirado. Gere um novo no painel da Meta (WhatsApp → Configuração da API).")
+    if not await subscribe_waba(waba_id, data.access_token.strip()):
+        logger.warning("Falha ao inscrever app na WABA de teste — eventos de webhook podem não chegar")
     now = datetime.now(timezone.utc).isoformat()
     await db.whatsapp_connections.update_one(
         {"office_id": user["office_id"]},
