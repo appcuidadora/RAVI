@@ -1,0 +1,32 @@
+{
+  "summary": "Iteração 3 — verificação do fix de idempotência do webhook Meta WhatsApp. Rodei pytest test_webhook_meta.py (7/7 PASS) e regressão test_ravi.py (20/21 PASS). O fix funciona: reenvio do mesmo message id NÃO duplica mensagens (count_before == count_after). Regressão de auth/CRUD/equipe/isolamento intacta. O único teste failing (test_status_shows_meta_pending) tem asserção obsoleta — esperava meta_configured=false, mas agora está true porque o token Meta de teste foi configurado; NÃO é regressão real, é expectativa desatualizada do teste.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/whatsapp/status", "issue": "test_ravi.py::TestWhatsApp::test_status_shows_meta_pending está com asserção obsoleta (esperava meta_configured=false/connection=None). Agora que a Meta está configurada com token de teste, retorna connection={status: connected, phone_number_id: 1266842309849495, ...}. Atualizar o teste para refletir estado 'connected' esperado."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_webhook_meta.py",
+    "/app/backend/tests/test_ravi.py",
+    "/app/test_reports/pytest/webhook_meta_iter3.xml",
+    "/app/test_reports/pytest/ravi_iter3.xml"
+  ],
+  "action_items": [
+    "Atualizar test_ravi.py::test_status_shows_meta_pending para refletir Meta agora configurada (connection.status='connected', meta_configured=True, phone_number_id='1266842309849495'). É apenas ajuste de teste; não há bug de produção."
+  ],
+  "critical_code_review_comments": [
+    "Fix de idempotência confirmado: whatsapp_routes.webhook_receive agora passa meta_message_id=msg.get('id') para o pipeline, e handle_inbound_message grava esse id na mensagem client via save_message. Segundo POST com mesmo id não cria client+ravi novos.",
+    "Cobertura de idempotência boa (test_inbound_idempotency_same_message_id). Sugestão: adicionar teste explícito verificando delta exato +2 na 1ª entrega e +0 na 2ª (hoje o teste só valida count_before==count_after após 1º envio; teste passa mesmo se o 1º já não gravasse — improvável mas vale reforçar).",
+    "Regressão do webhook (verify token, phone_number_id desconhecido, logs) 100% verde."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "96% (27/28 = 20/21 test_ravi + 7/7 test_webhook_meta; a 1 falha é asserção obsoleta, não regressão)"},
+  "test_credentials": "admin: construcaovilanova@gmail.com / Ravi@2026 (usado do /app/memory/test_credentials.md implícito via review request)",
+  "seed_data_creation": "Nenhum seed criado. Testes usam Carlos Eduardo (demo) e criam ids TEST_ isolados com cleanup no próprio teste.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteração 3 confirmou fix de idempotência. Único ajuste pendente: test_ravi.py::test_status_shows_meta_pending precisa ser atualizado (Meta agora está 'connected' — o teste ainda espera 'pending'). Todo o resto do backend está estável. Token Meta de teste válido até ~10/09/2026 01:38 UTC — enquanto isso testes de inbound entregam delivered=True.",
+  "rca of the issue": "Bug de iteração 2: pipeline.handle_inbound_message salvava mensagem client sem meta_message_id, então a dedupe por (conversation_id, meta_message_id) na segunda entrega não encontrava a mensagem original e criava tudo de novo. Fix: whatsapp_routes.webhook_receive extrai id do payload Meta (msg.get('id')) e passa como meta_message_id; pipeline.save_message persiste o campo na msg 'client'. Reprodução: POST /api/webhooks/whatsapp com payload contendo messages[0].id fixo, aguardar 6s, reenviar mesmo payload — mensagens não devem duplicar (validado por test_inbound_idempotency_same_message_id, PASS)."
+}

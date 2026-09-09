@@ -273,6 +273,7 @@ class TestWhatsApp:
         r = admin_session.get(f"{API}/whatsapp/status")
         assert r.status_code == 200
         d = r.json()
-        assert d["meta_configured"] is False
-        assert d["connection"] is None
         assert d["webhook_url"] == "/api/webhooks/whatsapp"
+        # Meta conectada com número de teste (phone_number_id 1266842309849495)
+        assert d["connection"]["status"] == "connected"
+        assert d["connection"]["phone_number_id"] == "1266842309849495"

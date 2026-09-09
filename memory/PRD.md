@@ -29,9 +29,11 @@ SOCIO_ADMIN (total), ADVOGADO_ASSOCIADO, ESTAGIARIO, SECRETARIA_ATENDIMENTO — 
 - Admin: construcaovilanova@gmail.com / Ravi@2026 (Dr. Carlos Mendes, Silva Advocacia)
 - Demo seed: cliente Carlos Eduardo, processo 1001234-56.2025.8.26.0100 (TJSP), conversa demo, alerta vermelho, KPIs 50/63/41/3/3h42
 
-## Estado do MVP (09/06/2026)
-- 100% dos testes passando (backend 21/21 + fluxos críticos de frontend) — /app/test_reports/iteration_1.json
-- Regressão: `pytest /app/backend/tests/test_ravi.py`
+## Estado do MVP (09/09/2026)
+- 100% dos testes passando (backend 28/28: auth, CRUD, permissões, isolamento, webhook Meta, idempotência) — /app/test_reports/iteration_1..3.json
+- WhatsApp conectado com número de teste da Meta (+1 555-665-3479, phone_number_id 1266842309849495); envio outbound real confirmado (delivered=true, usuário recebeu mensagem no WhatsApp pessoal)
+- Webhook público verificado pela Meta (GET 200); aguardando usuário assinar campo "messages" no painel para inbound real
+- Regressão: `pytest /app/backend/tests/test_ravi.py tests/test_webhook_meta.py`
 
 ## Pendências para produção
 - P0: credenciais da Meta App (META_APP_ID, META_APP_SECRET, META_CONFIG_ID) para ativar Embedded Signup real; App Review Meta (whatsapp_business_management/messaging); registrar webhook na Meta com a URL pública

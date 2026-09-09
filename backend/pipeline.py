@@ -43,7 +43,8 @@ async def create_alert(office_id: str, alert_type: str, title: str, reason: str 
 
 
 async def handle_inbound_message(office_id: str, phone: str, text: str,
-                                 connection: dict = None, source: str = "whatsapp") -> dict:
+                                 connection: dict = None, source: str = "whatsapp",
+                                 meta_message_id: str = None) -> dict:
     """Pipeline central: webhook da Meta e simulação passam por aqui.
     Meta → webhook → phone_number_id → WhatsAppConnection → office_id → cliente → conversa → RAVI."""
     norm = normalize_phone(phone)
@@ -56,7 +57,7 @@ async def handle_inbound_message(office_id: str, phone: str, text: str,
         conv = {
             "id": uuid.uuid4().hex, "office_id": office_id, "phone_normalized": norm,
             "client_id": client["id"] if client else None,
-            "process_id": client.get("process_ids", [None])[0] if client else None,
+            "process_id": (client.get("process_ids") or [None])[0] if client else None,
             "status": "active" if client else "unidentified",
             "risk_level": "green", "ai_enabled": True, "human_control": False,
             "assigned_user_id": None, "created_at": now_iso(), "last_message_at": now_iso(),
@@ -68,7 +69,7 @@ async def handle_inbound_message(office_id: str, phone: str, text: str,
                                conversation_id=conv["id"])
             await audit(office_id, "unidentified_contact", conversation_id=conv["id"], phone=norm)
 
-    await save_message(office_id, conv["id"], "client", text)
+    await save_message(office_id, conv["id"], "client", text, meta_message_id=meta_message_id)
     await audit(office_id, "message_received", conversation_id=conv["id"],
                 client_id=client["id"] if client else None, text=text[:200])
 

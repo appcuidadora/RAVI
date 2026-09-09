@@ -136,6 +136,7 @@ async def webhook_receive(request: Request):
         payload = json.loads(raw)
     except Exception:
         raise HTTPException(400, "Payload inválido")
+    logger.info(f"Webhook Meta recebido: {raw[:2000].decode('utf-8', 'replace')}")
 
     for entry in payload.get("entry", []):
         for change in entry.get("changes", []):
@@ -159,5 +160,6 @@ async def webhook_receive(request: Request):
                     continue  # idempotência: Meta reenvia eventos
                 text = (msg.get("text") or {}).get("body", "")
                 await handle_inbound_message(connection["office_id"], msg.get("from", ""),
-                                             text, connection=connection)
+                                             text, connection=connection,
+                                             meta_message_id=msg.get("id"))
     return {"ok": True}
