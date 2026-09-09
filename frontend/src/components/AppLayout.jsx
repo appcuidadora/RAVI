@@ -73,9 +73,13 @@ export default function AppLayout() {
       <div className="flex-1 py-4 overflow-y-auto">
         <NavItems permissions={user?.permissions} onNavigate={() => setMobileOpen(false)} />
       </div>
-      <div className="p-4 border-t border-[#23283E]">
+      <div className="p-4 border-t border-[#23283E] space-y-2">
         <p className="text-xs text-zinc-500 truncate">{office?.name || "Meu escritório"}</p>
-        <p className="text-[10px] font-mono-code uppercase tracking-widest text-zinc-600 mt-0.5">RAVI Atendimento</p>
+        <p className="text-[10px] font-mono-code uppercase tracking-widest text-zinc-600">RAVI Atendimento</p>
+        <button onClick={handleLogout} data-testid="sidebar-logout-btn"
+          className="flex items-center gap-2 text-xs text-zinc-500 hover:text-rose-400 transition-colors duration-150 mt-1">
+          <LogOut size={13} /> Sair da conta
+        </button>
       </div>
     </div>
   );

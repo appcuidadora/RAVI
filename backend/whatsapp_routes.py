@@ -25,6 +25,7 @@ async def whatsapp_status(user: dict = Depends(get_current_user)):
         conn = await db.whatsapp_connections.find_one({"office_id": user["office_id"]}, {"_id": 0})
     return {
         "meta_configured": meta_configured(),
+        "meta_test_available": bool(os.environ.get("META_TEST_PHONE_NUMBER_ID")),
         "app_id": os.environ.get("META_APP_ID") or None,
         "config_id": os.environ.get("META_CONFIG_ID") or None,
         "graph_version": os.environ.get("META_GRAPH_VERSION", "v25.0"),
@@ -78,6 +79,36 @@ async def whatsapp_disconnect(user: dict = Depends(require_permission("whatsapp"
                   "updated_at": datetime.now(timezone.utc).isoformat()}})
     await audit(user["office_id"], "whatsapp_disconnected", actor=user["email"])
     return {"ok": True, "status": "disconnected"}
+
+
+class ConnectTestIn(BaseModel):
+    access_token: str
+
+
+@router.post("/whatsapp/connect-test")
+async def whatsapp_connect_test(data: ConnectTestIn, user: dict = Depends(require_permission("whatsapp"))):
+    """Conexão com o número de teste da Meta (painel API Setup). O token temporário (24h)
+    é informado manualmente uma única vez e fica apenas no servidor."""
+    phone_id = os.environ.get("META_TEST_PHONE_NUMBER_ID")
+    waba_id = os.environ.get("META_TEST_WABA_ID")
+    if not phone_id or not waba_id:
+        raise HTTPException(503, "Número de teste não configurado no servidor")
+    if not data.access_token.strip():
+        raise HTTPException(400, "Informe o token de acesso temporário")
+    display = await fetch_phone_display(phone_id, data.access_token.strip())
+    if not display:
+        raise HTTPException(400, "Token inválido ou expirado. Gere um novo no painel da Meta (WhatsApp → Configuração da API).")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.whatsapp_connections.update_one(
+        {"office_id": user["office_id"]},
+        {"$set": {"id": uuid.uuid4().hex, "office_id": user["office_id"],
+                  "business_account_id": waba_id, "phone_number_id": phone_id,
+                  "display_phone_number": display, "status": "connected",
+                  "access_token": data.access_token.strip(), "mode": "test", "updated_at": now},
+         "$setOnInsert": {"created_at": now}},
+        upsert=True)
+    await audit(user["office_id"], "whatsapp_connected_test", actor=user["email"], phone_number_id=phone_id)
+    return {"ok": True, "status": "connected", "display_phone_number": display}
 
 
 # ---------- WEBHOOK PÚBLICO (sem sessão de usuário) ----------

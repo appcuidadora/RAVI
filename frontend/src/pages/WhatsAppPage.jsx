@@ -3,6 +3,7 @@ import { api, apiError } from "@/lib/api";
 import { toast } from "sonner";
 import { PhoneCall, Unplug, CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 const META_APP_ID = process.env.REACT_APP_META_APP_ID;
 const META_CONFIG_ID = process.env.REACT_APP_META_CONFIG_ID;
@@ -12,6 +13,8 @@ export default function WhatsAppPage() {
   const [status, setStatus] = useState(null);
   const [sdkReady, setSdkReady] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [testToken, setTestToken] = useState("");
+  const [connectingTest, setConnectingTest] = useState(false);
 
   const load = () => api.get("/whatsapp/status").then((r) => setStatus(r.data)).catch(() => {});
   useEffect(() => { load(); }, []);
@@ -64,6 +67,21 @@ export default function WhatsAppPage() {
         setConnecting(false);
       }
     }, { config_id: META_CONFIG_ID, response_type: "code", override_default_response_type: true, extras: { setup: {} } });
+  };
+
+  const connectTest = async (e) => {
+    e.preventDefault();
+    setConnectingTest(true);
+    try {
+      const { data } = await api.post("/whatsapp/connect-test", { access_token: testToken });
+      toast.success(`Número de teste conectado: ${data.display_phone_number}`);
+      setTestToken("");
+      load();
+    } catch (e2) {
+      toast.error(apiError(e2, "Falha ao conectar número de teste"));
+    } finally {
+      setConnectingTest(false);
+    }
   };
 
   const disconnect = async () => {
@@ -125,6 +143,25 @@ export default function WhatsAppPage() {
               <p className="font-mono-code text-[10px] uppercase tracking-widest text-zinc-600">Como funciona para o advogado</p>
               <p>Conectar WhatsApp → autorização oficial da Meta → pronto. O Ravi nunca pede tokens, IDs ou senhas de tribunal.</p>
             </div>
+
+            {status?.meta_test_available && (
+              <div className="rounded-lg border border-indigo-800/40 bg-indigo-950/30 p-4 space-y-3" data-testid="test-number-panel">
+                <p className="text-sm text-indigo-300 font-medium">Número de teste da Meta (+1 555 665-3479)</p>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  Cole o token de acesso temporário do painel da Meta (WhatsApp → Configuração da API).
+                  Ele fica salvo somente no servidor do RAVI e nunca aparece aqui novamente.
+                </p>
+                <form onSubmit={connectTest} className="flex gap-2">
+                  <Input type="password" value={testToken} onChange={(e) => setTestToken(e.target.value)}
+                    data-testid="test-token-input" placeholder="Token de acesso temporário (24h)"
+                    className="bg-[#090A0F] border-[#23283E] font-mono-code text-xs" />
+                  <Button type="submit" disabled={connectingTest || !testToken.trim()} data-testid="connect-test-btn"
+                    className="brand-gradient brand-gradient-hover text-white border-0 shrink-0">
+                    {connectingTest ? <Loader2 size={15} className="animate-spin" /> : "Ativar"}
+                  </Button>
+                </form>
+              </div>
+            )}
           </>
         )}
 
