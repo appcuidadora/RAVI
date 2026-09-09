@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, apiError } from "@/lib/api";
 import { toast } from "sonner";
@@ -19,6 +19,8 @@ export default function Processos() {
   const [search, setSearch] = useState("");
   const [newClient, setNewClient] = useState({ name: "", phone: "" });
   const [cobrancas, setCobrancas] = useState([]);
+  const [pdfFile, setPdfFile] = useState(null);
+  const fileRef = useRef(null);
 
   const load = () => api.get("/processes").then((r) => setProcesses(r.data)).catch(() => {});
   useEffect(() => {
@@ -40,10 +42,21 @@ export default function Processos() {
         cobrancas: cobrancas.filter((c) => c.valor && c.data_vencimento),
       };
       const { data } = await api.post("/processes", payload);
+      if (pdfFile) {
+        try {
+          const fd = new FormData();
+          fd.append("file", pdfFile);
+          await api.post(`/processes/${data.id}/document`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+          toast.success("PDF anexado — a IA já consegue ler o documento");
+        } catch {
+          toast.warning("Processo criado, mas o PDF não foi anexado. Tente na tela do processo.");
+        }
+      }
       setOpen(false);
       setForm(EMPTY);
       setNewClient({ name: "", phone: "" });
       setCobrancas([]);
+      setPdfFile(null);
       if (data.tribunal) {
         toast.success(`Processo identificado: ${data.tribunal}`);
       } else {
@@ -66,7 +79,8 @@ export default function Processos() {
           <h1 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight text-zinc-100">Processos</h1>
           <p className="text-sm text-zinc-500 mt-1">Informe o número. O Ravi identifica tribunal e segmento automaticamente.</p>
         </div>
-        <Button onClick={() => setOpen(true)} data-testid="add-process-btn" className="brand-gradient brand-gradient-hover text-white border-0">
+        <Button onClick={() => { setForm(EMPTY); setNewClient({ name: "", phone: "" }); setCobrancas([]); setPdfFile(null); setOpen(true); }}
+          data-testid="add-process-btn" className="brand-gradient brand-gradient-hover text-white border-0">
           <Plus size={16} className="mr-1.5" /> Novo processo
         </Button>
       </div>
@@ -152,6 +166,15 @@ export default function Processos() {
                 </div>
               </div>
             )}
+            <div className="space-y-1.5">
+              <Label className="text-zinc-400 text-xs">Arquivo do processo (PDF, opcional)</Label>
+              <button type="button" onClick={() => fileRef.current?.click()} data-testid="process-pdf-btn"
+                className="w-full rounded-lg border border-dashed border-[#3F476C] bg-[#090A0F] px-3 py-2.5 text-left text-xs text-zinc-400 hover:border-indigo-500/50 hover:text-zinc-200 transition-colors duration-150 truncate">
+                {pdfFile ? `📄 ${pdfFile.name}` : "Anexar PDF — a IA lê o documento e usa nas respostas ao cliente"}
+              </button>
+              <input ref={fileRef} type="file" accept="application/pdf" className="hidden"
+                onChange={(e) => setPdfFile(e.target.files?.[0] || null)} data-testid="process-pdf-input" />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-zinc-400 text-xs">Situação</Label>
