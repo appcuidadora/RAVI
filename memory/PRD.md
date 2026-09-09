@@ -38,6 +38,7 @@ SOCIO_ADMIN (total), ADVOGADO_ASSOCIADO, ESTAGIARIO, SECRETARIA_ATENDIMENTO — 
 - Feature 3: memória de conversa com as últimas 50 mensagens no contexto da IA
 - Feature 4 (áudio): webhook aceita type=audio → baixa mídia via Graph API → ffmpeg ogg→mp3 → Whisper whisper-1 (pt) → pipeline normal; msg salva com kind='audio' e badge "áudio transcrito" na UI; processamento do webhook em BackgroundTasks (ack rápido à Meta); demais tipos (imagem/vídeo/doc/sticker) são ignorados com log
 - Feature 5 (conexão SaaS): fluxo Embedded Signup sem credenciais para o advogado — POST /whatsapp/connect/start (state seguro: aleatório, uso único, expira 10min, office_id do JWT) → redirect OAuth oficial da Meta (config_id) → GET /whatsapp/connect/callback (valida state atomicamente, troca code→token, resolve WABA+phone via debug_token, inscreve WABA, salva conexão) → /whatsapp?connected=1; QR Code (react-qr-code) para conectar pelo celular com o mesmo state; POST /whatsapp/test-connection com mensagens amigáveis; desconexão com confirmação mantendo histórico; página sem dados técnicos; BLOQUEIO: precisa META_APP_ID/META_APP_SECRET/META_CONFIG_ID (Meta App do RAVI) para ativar
+- Detecção de token Meta expirado: falha OAuth 190 no envio → conexão vira "token_expired" + alerta de intervenção "WhatsApp precisa ser reconectado" (não falha mais em silêncio)
 - Regressão: `pytest /app/backend/tests/ -n0`
 
 ## Pendências para produção

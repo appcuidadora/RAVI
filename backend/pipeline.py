@@ -115,6 +115,13 @@ async def handle_inbound_message(office_id: str, phone: str, text: str,
             meta_id = (resp.get("messages") or [{}])[0].get("id")
         except Exception as e:
             logger.error(f"Falha ao enviar WhatsApp: {e}")
+            if "190" in str(e) or "OAuthException" in str(e):
+                await db.whatsapp_connections.update_one(
+                    {"id": connection["id"]},
+                    {"$set": {"status": "token_expired", "updated_at": now_iso()}})
+                await create_alert(office_id, "intervention", "WhatsApp precisa ser reconectado",
+                                   "A autorização temporária da Meta expirou. Reconecte na tela WhatsApp para o Ravi voltar a enviar mensagens.",
+                                   conversation_id=conv["id"], client_id=client["id"])
 
     await save_message(office_id, conv["id"], "ravi", reply, risk_level=level,
                        meta_message_id=meta_id, delivered=delivered)
