@@ -1,0 +1,37 @@
+{
+  "summary": "Iteração 7 — testes do fluxo Embedded Signup SaaS puro do WhatsApp (connect/start, connect/callback state lifecycle, test-connection, desconexão, isolamento e UI). Backend: criado /app/backend/tests/test_whatsapp_connect_flow.py com 13 testes (auth guard, 503 Meta não configurada, state válido/inexistente/expirado/reutilizado, callback marca used=true atomicamente, test-connection sem conexão retorna 400 amigável, /status não expõe access_token, assinatura do callback via AST não aceita office_id, desconexão preserva clients/conversations/processes/messages) — 13/13 PASS. Regressão suite completa: 63 passed, 2 skipped, 0 falhas (as 2 falhas ambientais que existiam na iter6 estão resolvidas). Frontend: página /whatsapp verificada com Playwright — título 'Conecte o WhatsApp do seu escritório', card conectado com número '+1 555-665-3479', status 'Ativo', botões Testar/Configurações/Desconectar presentes com data-testid; dialog de confirmação abre/fecha corretamente; HTML NÃO expõe phone_number_id/access_token/waba_id (todos os campos técnicos removidos da UI); toast amigável 'Precisamos concluir uma etapa de autorização da Meta. Tente novamente.' aparece com ?error=invalid_state e query string é limpa (URL final: /whatsapp).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_whatsapp_connect_flow.py",
+    "/app/test_reports/pytest/iter7_connect.xml",
+    "/app/test_reports/pytest/iter7_full.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "whatsapp_routes.connect_callback: uso de find_one_and_update com filtro {used:false, expires_at:{$gt:now}} garante atomicidade (bem feito — sem race na exclusão mútua entre validação e marcação).",
+    "whatsapp_routes.connect_start: office_id vem do JWT (user.office_id), nunca do payload/query — corretíssimo do ponto de vista de segurança multi-tenant.",
+    "whatsapp_meta.resolve_waba_and_phone: usa app access token (app_id|app_secret) no header p/ debug_token e user token p/ phone_numbers — padrão correto da Meta.",
+    "whatsapp_routes.py está com 299 linhas, ainda dentro do limite (<700).",
+    "Sugestão (não bloqueante): expires_at como string ISO funciona no $gt porque ordem lexicográfica coincide com ordem temporal em UTC, mas é frágil se um dia entrar sufixo tipo '+00:00' misturado com 'Z'. Idealmente armazenar como datetime BSON nativo (Mongo suporta) para eliminar risco. Comportamento atual está OK porque tudo é gerado com datetime.isoformat() consistente.",
+    "WhatsAppPage.jsx: apiError() usado como fallback amigável, uso correto de useSearchParams para limpar querystring após toast, botão QR reutiliza o mesmo state seguro (não emite outro). Excelente.",
+    "Nenhum vazamento de campos técnicos (phone_number_id / access_token / waba_id / webhook_url) no HTML renderizado — regressão do requisito 'advogado NUNCA vê tokens' confirmada."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_whatsapp_connect_flow.py"
+  ],
+  "success_rate": {"backend": "100% (13/13 novos testes + 63/63 regressão pass, 2 skips ambientais)", "frontend": "100% dos itens da review checados via Playwright"},
+  "test_credentials": "admin: construcaovilanova@gmail.com / Ravi@2026",
+  "seed_data_creation": "N/A — testes usam apenas inserções temporárias na coleção whatsapp_connect_states (limpas ao final de cada teste).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Feature Embedded Signup SaaS puro validada 100% do que é testável sem credenciais Meta reais (META_APP_ID/META_APP_SECRET/META_CONFIG_ID vazios no .env). O fluxo real end-to-end (redirect Meta → autorização → callback com code real → troca por token → subscribe WABA) NÃO pode ser exercitado sem essas credenciais e depende de infra externa da Meta. Todo o restante — state lifecycle atômico, uso único, expiração, mensagens amigáveis, isolamento office_id via JWT, ausência de dados técnicos na UI, toasts, dialogs de confirmação — está funcionando conforme spec. Suite total 63/65 (2 skips ambientais, 0 falhas).",
+  "rca of the issue": "N/A — nenhuma falha encontrada."
+}

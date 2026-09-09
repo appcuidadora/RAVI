@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 import httpx
 
@@ -43,6 +44,38 @@ async def fetch_phone_display(phone_number_id: str, token: str) -> str:
     except Exception as e:
         logger.error(f"fetch_phone_display: {e}")
     return ""
+
+
+async def resolve_waba_and_phone(user_token: str, intended_phone: str = None) -> tuple:
+    """Pós Embedded Signup: descobre a WABA (via debug_token) e o phone_number_id.
+    Se o advogado informou um número, prioriza o telefone correspondente."""
+    app_id = os.environ["META_APP_ID"]
+    app_secret = os.environ["META_APP_SECRET"]
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.get(f"{graph_base()}/debug_token", params={"input_token": user_token},
+                        headers={"Authorization": f"Bearer {app_id}|{app_secret}"})
+        r.raise_for_status()
+        waba_ids = []
+        for gs in (r.json().get("data") or {}).get("granular_scopes", []):
+            if gs.get("scope") in ("whatsapp_business_management", "whatsapp_business_messaging"):
+                waba_ids.extend(gs.get("target_ids") or [])
+        if not waba_ids:
+            return None, None, ""
+        waba_id = waba_ids[0]
+        r2 = await c.get(f"{graph_base()}/{waba_id}/phone_numbers",
+                         headers={"Authorization": f"Bearer {user_token}"})
+        r2.raise_for_status()
+        phones = r2.json().get("data", [])
+        if not phones:
+            return waba_id, None, ""
+        chosen = phones[0]
+        if intended_phone:
+            for p in phones:
+                digits = re.sub(r"\D", "", p.get("display_phone_number", ""))
+                if digits.endswith(intended_phone[-8:]):
+                    chosen = p
+                    break
+        return waba_id, chosen["id"], chosen.get("display_phone_number", "")
 
 
 async def get_media_bytes(media_id: str, token: str) -> tuple:

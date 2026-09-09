@@ -3,8 +3,10 @@ import hmac
 import hashlib
 import json
 import logging
+import secrets
 import uuid
-from datetime import datetime, timezone
+import httpx
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Request, Query, Depends, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
@@ -79,6 +81,109 @@ async def whatsapp_disconnect(user: dict = Depends(require_permission("whatsapp"
                   "updated_at": datetime.now(timezone.utc).isoformat()}})
     await audit(user["office_id"], "whatsapp_disconnected", actor=user["email"])
     return {"ok": True, "status": "disconnected"}
+
+
+# ---------- EMBEDDED SIGNUP (fluxo oficial Meta, sem credenciais para o advogado) ----------
+
+class ConnectStartIn(BaseModel):
+    phone: str
+
+
+@router.post("/whatsapp/connect/start")
+async def connect_start(data: ConnectStartIn, user: dict = Depends(require_permission("whatsapp"))):
+    """Cria sessão segura de conexão: state aleatório, de uso único, com expiração,
+    vinculado ao office_id do usuário autenticado (nunca confia no frontend)."""
+    if not meta_configured() or not os.environ.get("META_CONFIG_ID"):
+        raise HTTPException(503, "A conexão oficial ainda não está disponível. Fale com o suporte RAVI.")
+    from utils import normalize_phone
+    norm = normalize_phone(data.phone)
+    if not (norm.startswith("55") and len(norm) in (12, 13)):
+        raise HTTPException(400, "Informe um número brasileiro válido com DDD.")
+    state = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    await db.whatsapp_connect_states.insert_one({
+        "state": state, "office_id": user["office_id"], "phone": norm,
+        "used": False, "created_at": now.isoformat(),
+        "expires_at": (now + timedelta(minutes=10)).isoformat(),
+    })
+    from urllib.parse import urlencode
+    base = os.environ.get("FRONTEND_URL", "").rstrip("/")
+    params = {
+        "client_id": os.environ["META_APP_ID"],
+        "redirect_uri": f"{base}/api/whatsapp/connect/callback",
+        "state": state,
+        "response_type": "code",
+        "config_id": os.environ["META_CONFIG_ID"],
+        "override_default_response_type": "true",
+        "extras": json.dumps({"setup": {}, "featureType": "", "sessionInfoVersion": "3"}),
+    }
+    await audit(user["office_id"], "whatsapp_connect_started", actor=user["email"])
+    return {"url": f"https://www.facebook.com/dialog/oauth?{urlencode(params)}"}
+
+
+@router.get("/whatsapp/connect/callback")
+async def connect_callback(code: str = Query(None), state: str = Query(None)):
+    """Callback público da Meta: valida o state (uso único + expiração), identifica o
+    office_id, troca o code por token, descobre WABA/número e salva a conexão."""
+    from fastapi.responses import RedirectResponse
+    base = os.environ.get("FRONTEND_URL", "").rstrip("/")
+
+    if not code or not state:
+        return RedirectResponse(f"{base}/whatsapp?error=missing_params")
+    now = datetime.now(timezone.utc).isoformat()
+    st = await db.whatsapp_connect_states.find_one_and_update(
+        {"state": state, "used": False, "expires_at": {"$gt": now}},
+        {"$set": {"used": True, "used_at": now}})
+    if not st:
+        return RedirectResponse(f"{base}/whatsapp?error=invalid_state")
+    try:
+        token = await exchange_code_for_token(code)
+        from whatsapp_meta import resolve_waba_and_phone
+        waba_id, phone_number_id, display = await resolve_waba_and_phone(token, st.get("phone"))
+        if not waba_id or not phone_number_id:
+            raise ValueError("WABA/telefone não encontrados após autorização")
+        await subscribe_waba(waba_id, token)
+        now2 = datetime.now(timezone.utc).isoformat()
+        await db.whatsapp_connections.update_one(
+            {"office_id": st["office_id"]},
+            {"$set": {"id": uuid.uuid4().hex, "office_id": st["office_id"],
+                      "business_account_id": waba_id, "phone_number_id": phone_number_id,
+                      "display_phone_number": display, "status": "connected",
+                      "access_token": token, "mode": "production", "updated_at": now2},
+             "$setOnInsert": {"created_at": now2}},
+            upsert=True)
+        await audit(st["office_id"], "whatsapp_connected", actor="embedded_signup",
+                    phone_number_id=phone_number_id)
+        return RedirectResponse(f"{base}/whatsapp?connected=1")
+    except Exception as e:
+        logger.error(f"Embedded signup callback falhou (office {st['office_id']}): {e}")
+        return RedirectResponse(f"{base}/whatsapp?error=connect_failed")
+
+
+@router.post("/whatsapp/test-connection")
+async def test_connection(user: dict = Depends(require_permission("whatsapp"))):
+    """Valida a conexão sem expor detalhes técnicos ao advogado."""
+    conn = await db.whatsapp_connections.find_one({"office_id": user["office_id"]}, {"_id": 0})
+    if not conn or conn.get("status") != "connected":
+        raise HTTPException(400, "WhatsApp não está conectado.")
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.get(
+                f"https://graph.facebook.com/{os.environ.get('META_GRAPH_VERSION', 'v25.0')}/{conn['phone_number_id']}",
+                params={"fields": "display_phone_number,verified_name,quality_rating,status"},
+                headers={"Authorization": f"Bearer {conn.get('access_token', '')}"})
+        if r.is_error:
+            logger.error(f"test-connection Meta: {r.text}")
+            raise HTTPException(400, "Não conseguimos validar a conexão agora. Reconecte o WhatsApp.")
+        d = r.json()
+        return {"ok": True, "display_phone_number": d.get("display_phone_number"),
+                "verified_name": d.get("verified_name"), "quality_rating": d.get("quality_rating"),
+                "account_status": d.get("status")}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"test-connection: {e}")
+        raise HTTPException(400, "Não conseguimos validar a conexão agora. Tente novamente.")
 
 
 class ConnectTestIn(BaseModel):

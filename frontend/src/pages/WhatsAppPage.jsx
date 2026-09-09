@@ -1,72 +1,75 @@
 import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, apiError } from "@/lib/api";
 import { toast } from "sonner";
-import { PhoneCall, Unplug, CheckCircle2, Loader2 } from "lucide-react";
+import QRCode from "react-qr-code";
+import { PhoneCall, Unplug, CheckCircle2, Loader2, QrCode, Settings, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
-const META_APP_ID = process.env.REACT_APP_META_APP_ID;
-const META_CONFIG_ID = process.env.REACT_APP_META_CONFIG_ID;
-const META_VERSION = process.env.REACT_APP_META_GRAPH_VERSION || "v25.0";
+const FRIENDLY_ERRORS = {
+  invalid_state: "Precisamos concluir uma etapa de autorização da Meta. Tente novamente.",
+  missing_params: "Não foi possível concluir a autorização da Meta. Tente novamente.",
+  connect_failed: "Não foi possível conectar seu WhatsApp agora. Verifique o número e tente novamente.",
+};
+
+function maskPhone(v) {
+  const d = v.replace(/\D/g, "").slice(0, 11);
+  if (d.length <= 2) return d ? `(${d}` : "";
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
 
 export default function WhatsAppPage() {
+  const [params, setParams] = useSearchParams();
   const [status, setStatus] = useState(null);
-  const [sdkReady, setSdkReady] = useState(false);
+  const [phone, setPhone] = useState("");
   const [connecting, setConnecting] = useState(false);
+  const [qrUrl, setQrUrl] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [testOk, setTestOk] = useState(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [testToken, setTestToken] = useState("");
   const [connectingTest, setConnectingTest] = useState(false);
 
   const load = () => api.get("/whatsapp/status").then((r) => setStatus(r.data)).catch(() => {});
-  useEffect(() => { load(); }, []);
 
   useEffect(() => {
-    if (!META_APP_ID) return;
-    const s = document.createElement("script");
-    s.src = "https://connect.facebook.net/pt_BR/sdk.js";
-    s.async = true;
-    s.defer = true;
-    window.fbAsyncInit = () => {
-      window.FB.init({ appId: META_APP_ID, cookie: true, xfbml: true, version: META_VERSION });
-      setSdkReady(true);
-    };
-    document.body.appendChild(s);
+    load();
+    if (params.get("connected")) {
+      toast.success("WhatsApp conectado com sucesso");
+      setParams({}, { replace: true });
+    } else if (params.get("error")) {
+      toast.error(FRIENDLY_ERRORS[params.get("error")] || FRIENDLY_ERRORS.connect_failed);
+      setParams({}, { replace: true });
+    }
+  }, []); // eslint-disable-line
 
-    const onMessage = (e) => {
-      if (e.origin !== "https://www.facebook.com" && e.origin !== "https://business.facebook.com") return;
-      try {
-        const x = JSON.parse(e.data);
-        if (x.type === "WA_EMBEDDED_SIGNUP" && x.data) {
-          window.__waSignup = { waba_id: x.data.waba_id, phone_number_id: x.data.phone_number_id };
-        }
-      } catch {}
-    };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, []);
-
-  const connect = () => {
-    if (!window.FB) return;
+  const startConnect = async (forQr = false) => {
+    const digits = phone.replace(/\D/g, "");
+    if (digits.length < 10 || digits.length > 11) {
+      toast.error("Verifique o número informado e tente novamente.");
+      return;
+    }
     setConnecting(true);
-    window.FB.login(async (r) => {
-      try {
-        if (!r.authResponse?.code) { setConnecting(false); return; }
-        const ids = window.__waSignup || {};
-        if (!ids.waba_id || !ids.phone_number_id) {
-          toast.error("Não foi possível obter os dados da conta do WhatsApp. Tente novamente.");
-          setConnecting(false);
-          return;
-        }
-        await api.post("/whatsapp/connect", {
-          code: r.authResponse.code, waba_id: ids.waba_id, phone_number_id: ids.phone_number_id,
-        });
-        toast.success("WhatsApp conectado com sucesso");
-        load();
-      } catch (e) {
-        toast.error(apiError(e, "Falha ao conectar WhatsApp"));
-      } finally {
-        setConnecting(false);
+    try {
+      const { data } = await api.post("/whatsapp/connect/start", { phone });
+      if (forQr) {
+        setQrUrl(data.url);
+      } else {
+        window.location.href = data.url;
       }
-    }, { config_id: META_CONFIG_ID, response_type: "code", override_default_response_type: true, extras: { setup: {} } });
+    } catch (e) {
+      toast.error(apiError(e, FRIENDLY_ERRORS.connect_failed));
+    } finally {
+      setConnecting(false);
+    }
   };
 
   const connectTest = async (e) => {
@@ -78,111 +81,176 @@ export default function WhatsAppPage() {
       setTestToken("");
       load();
     } catch (e2) {
-      toast.error(apiError(e2, "Falha ao conectar número de teste"));
+      toast.error(apiError(e2, "Não foi possível conectar agora. Tente novamente."));
     } finally {
       setConnectingTest(false);
+    }
+  };
+
+  const testConnection = async () => {
+    setTesting(true);
+    setTestOk(null);
+    try {
+      const { data } = await api.post("/whatsapp/test-connection");
+      setTestOk(data);
+      toast.success("Conexão validada");
+    } catch (e) {
+      setTestOk(false);
+      toast.error(apiError(e, "Não conseguimos validar a conexão agora. Tente novamente."));
+    } finally {
+      setTesting(false);
     }
   };
 
   const disconnect = async () => {
     try {
       await api.post("/whatsapp/disconnect");
-      toast.success("WhatsApp desconectado");
+      toast.success("WhatsApp desconectado. Seu histórico de clientes e conversas foi mantido.");
+      setTestOk(null);
       load();
-    } catch (e) { toast.error(apiError(e)); }
+    } catch (e) {
+      toast.error(apiError(e, "Não foi possível desconectar agora. Tente novamente."));
+    }
   };
 
   const conn = status?.connection;
   const connected = conn?.status === "connected";
-  const webhookUrl = `${process.env.REACT_APP_BACKEND_URL}/api/webhooks/whatsapp`;
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-3xl" data-testid="whatsapp-page">
+    <div className="p-6 lg:p-8 space-y-6 max-w-2xl" data-testid="whatsapp-page">
       <div className="fade-up">
-        <h1 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight text-zinc-100">Conexão WhatsApp</h1>
+        <h1 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight text-zinc-100">
+          Conecte o WhatsApp do seu escritório
+        </h1>
         <p className="text-sm text-zinc-500 mt-1">
-          Conexão oficial via WhatsApp Business Platform (Cloud API) da Meta. Nada de QR Code ou gambiarras.
+          Informe o número que sua equipe utiliza para atender seus clientes pelo WhatsApp.
         </p>
       </div>
 
-      <div className="rounded-xl border border-[#23283E] bg-[#0F111A] p-6 space-y-5 fade-up" data-testid="whatsapp-status-card">
-        <div className="flex items-center justify-between">
+      {connected ? (
+        <div className="rounded-xl border border-emerald-700/40 bg-emerald-950/20 p-6 space-y-5 fade-up" data-testid="whatsapp-connected-card">
           <div className="flex items-center gap-3">
-            <span className={`w-3 h-3 rounded-full pulse-dot ${connected ? "bg-emerald-500" : "bg-zinc-600"}`} />
+            <span className="w-10 h-10 rounded-full bg-emerald-500/15 flex items-center justify-center shrink-0">
+              <CheckCircle2 size={20} className="text-emerald-400" />
+            </span>
             <div>
-              <p className="text-sm font-medium text-zinc-100" data-testid="whatsapp-status-text">
-                {connected ? "WhatsApp conectado" : "WhatsApp não conectado"}
-              </p>
-              {connected && conn?.display_phone_number && (
-                <p className="text-xs text-zinc-500" data-testid="whatsapp-number">{conn.display_phone_number}</p>
-              )}
+              <p className="font-display font-semibold text-lg text-zinc-100" data-testid="whatsapp-status-text">WhatsApp conectado</p>
+              <p className="text-sm text-zinc-400" data-testid="whatsapp-number">{conn.display_phone_number}</p>
             </div>
           </div>
-          {connected && <CheckCircle2 size={20} className="text-emerald-400" />}
-        </div>
-
-        {!connected && (
-          <>
-            {META_APP_ID ? (
-              <Button onClick={connect} disabled={!sdkReady || connecting} data-testid="connect-whatsapp-btn"
-                className="brand-gradient brand-gradient-hover text-white border-0">
-                {connecting ? <Loader2 size={15} className="mr-2 animate-spin" /> : <PhoneCall size={15} className="mr-2" />}
-                {connecting ? "Conectando…" : "Conectar WhatsApp"}
+          <div className="flex items-center gap-2 text-sm">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 pulse-dot" />
+            <span className="text-emerald-400" data-testid="whatsapp-connection-status">Ativo</span>
+          </div>
+          {testOk && (
+            <p className="text-sm text-emerald-300 bg-emerald-950/40 border border-emerald-800/40 rounded-lg px-3 py-2.5" data-testid="test-connection-ok">
+              WhatsApp conectado e pronto para atendimento{testOk.verified_name ? ` — ${testOk.verified_name}` : ""}.
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={testConnection} disabled={testing} data-testid="test-connection-btn"
+              className="brand-gradient brand-gradient-hover text-white border-0">
+              {testing ? <Loader2 size={15} className="mr-2 animate-spin" /> : <ShieldCheck size={15} className="mr-2" />}
+              Testar conexão
+            </Button>
+            <Link to="/configuracoes" data-testid="whatsapp-settings-link">
+              <Button variant="outline" className="border-[#3F476C] text-zinc-300">
+                <Settings size={15} className="mr-2" /> Configurações
               </Button>
-            ) : (
-              <div className="rounded-lg border border-amber-700/40 bg-amber-950/30 p-4" data-testid="meta-pending-panel">
-                <p className="text-sm text-amber-300 font-medium">Configuração da Meta App pendente</p>
-                <p className="text-xs text-zinc-400 mt-1.5 leading-relaxed">
-                  O adaptador está pronto: Embedded Signup, troca de código por token, inscrição da WABA e webhook.
-                  Assim que as credenciais da Meta App do RAVI (App ID, App Secret e Config ID do Embedded Signup)
-                  forem adicionadas ao servidor, este botão é ativado — sem nenhuma configuração técnica para o advogado.
-                </p>
+            </Link>
+            <Button variant="outline" onClick={() => setConfirmOpen(true)} data-testid="disconnect-whatsapp-btn"
+              className="border-rose-800/50 text-rose-400 hover:bg-rose-950/40">
+              <Unplug size={15} className="mr-2" /> Desconectar
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-[#23283E] bg-[#0F111A] p-6 space-y-5 fade-up" data-testid="whatsapp-connect-card">
+          {status?.meta_configured ? (
+            <>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-xs">País</Label>
+                  <Input value="Brasil (+55)" disabled data-testid="phone-country-input"
+                    className="bg-[#090A0F] border-[#23283E] text-zinc-500" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-xs">Número do WhatsApp de atendimento</Label>
+                  <Input value={phone} onChange={(e) => setPhone(maskPhone(e.target.value))}
+                    data-testid="office-phone-input" placeholder="(11) 99999-9999"
+                    className="bg-[#090A0F] border-[#23283E]" />
+                </div>
               </div>
-            )}
-            <div className="text-xs text-zinc-500 space-y-1.5">
-              <p className="font-mono-code text-[10px] uppercase tracking-widest text-zinc-600">Como funciona para o advogado</p>
-              <p>Conectar WhatsApp → autorização oficial da Meta → pronto. O Ravi nunca pede tokens, IDs ou senhas de tribunal.</p>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => startConnect(false)} disabled={connecting} data-testid="connect-whatsapp-btn"
+                  className="brand-gradient brand-gradient-hover text-white border-0">
+                  {connecting ? <Loader2 size={15} className="mr-2 animate-spin" /> : <PhoneCall size={15} className="mr-2" />}
+                  Conectar WhatsApp
+                </Button>
+                <Button variant="outline" onClick={() => startConnect(true)} disabled={connecting}
+                  data-testid="connect-qr-btn" className="border-[#3F476C] text-zinc-300">
+                  <QrCode size={15} className="mr-2" /> Conectar pelo celular
+                </Button>
+              </div>
+              {qrUrl && (
+                <div className="rounded-lg border border-[#23283E] bg-[#090A0F] p-5 inline-block" data-testid="qr-panel">
+                  <div className="bg-white p-3 rounded-lg inline-block">
+                    <QRCode value={qrUrl} size={160} />
+                  </div>
+                  <p className="text-xs text-zinc-500 mt-3 max-w-[220px]">
+                    Aponte a câmera do celular para abrir a autorização oficial da Meta. A conexão é vinculada ao seu escritório automaticamente.
+                  </p>
+                </div>
+              )}
+              <p className="text-xs text-zinc-500">
+                Você será redirecionado para a autorização oficial da Meta/WhatsApp e volta automaticamente ao RAVI.
+                Não pedimos senhas, códigos técnicos ou configurações.
+              </p>
+            </>
+          ) : (
+            <div className="rounded-lg border border-amber-700/40 bg-amber-950/30 p-4" data-testid="meta-pending-panel">
+              <p className="text-sm text-amber-300 font-medium">Conexão oficial em ativação</p>
+              <p className="text-xs text-zinc-400 mt-1.5 leading-relaxed">
+                Estamos concluindo a ativação da infraestrutura oficial da Meta para o RAVI.
+                Nenhuma configuração técnica será necessária para você — em breve bastará informar o número e clicar em "Conectar WhatsApp".
+              </p>
             </div>
+          )}
 
-            {status?.meta_test_available && (
-              <div className="rounded-lg border border-indigo-800/40 bg-indigo-950/30 p-4 space-y-3" data-testid="test-number-panel">
-                <p className="text-sm text-indigo-300 font-medium">Número de teste da Meta (+1 555 665-3479)</p>
-                <p className="text-xs text-zinc-400 leading-relaxed">
-                  Cole o token de acesso temporário do painel da Meta (WhatsApp → Configuração da API).
-                  Ele fica salvo somente no servidor do RAVI e nunca aparece aqui novamente.
-                </p>
-                <form onSubmit={connectTest} className="flex gap-2">
-                  <Input type="password" value={testToken} onChange={(e) => setTestToken(e.target.value)}
-                    data-testid="test-token-input" placeholder="Token de acesso temporário (24h)"
-                    className="bg-[#090A0F] border-[#23283E] font-mono-code text-xs" />
-                  <Button type="submit" disabled={connectingTest || !testToken.trim()} data-testid="connect-test-btn"
-                    className="brand-gradient brand-gradient-hover text-white border-0 shrink-0">
-                    {connectingTest ? <Loader2 size={15} className="animate-spin" /> : "Ativar"}
-                  </Button>
-                </form>
-              </div>
-            )}
-          </>
-        )}
+          {status?.meta_test_available && !status?.meta_configured && (
+            <div className="rounded-lg border border-indigo-800/40 bg-indigo-950/30 p-4 space-y-3" data-testid="test-number-panel">
+              <p className="text-sm text-indigo-300 font-medium">Ambiente de testes — número da Meta (+1 555 665-3479)</p>
+              <p className="text-xs text-zinc-400 leading-relaxed">Disponível apenas durante a fase de testes do RAVI.</p>
+              <form onSubmit={connectTest} className="flex gap-2">
+                <Input type="password" value={testToken} onChange={(e) => setTestToken(e.target.value)}
+                  data-testid="test-token-input" placeholder="Token temporário do painel da Meta"
+                  className="bg-[#090A0F] border-[#23283E] font-mono-code text-xs" />
+                <Button type="submit" disabled={connectingTest || !testToken.trim()} data-testid="connect-test-btn"
+                  className="brand-gradient brand-gradient-hover text-white border-0 shrink-0">
+                  {connectingTest ? <Loader2 size={15} className="animate-spin" /> : "Ativar"}
+                </Button>
+              </form>
+            </div>
+          )}
+        </div>
+      )}
 
-        {connected && (
-          <Button onClick={disconnect} variant="outline" data-testid="disconnect-whatsapp-btn"
-            className="border-rose-800/50 text-rose-400 hover:bg-rose-950/40">
-            <Unplug size={14} className="mr-1.5" /> Desconectar
-          </Button>
-        )}
-      </div>
-
-      <div className="rounded-xl border border-[#23283E] bg-[#0F111A] p-6 space-y-3 fade-up" data-testid="webhook-card">
-        <h3 className="font-display font-semibold text-zinc-200 text-sm">Webhook (para a Meta)</h3>
-        <p className="text-xs text-zinc-500">Endpoint público que recebe as mensagens e identifica o escritório pelo phone_number_id:</p>
-        <p className="font-mono-code text-xs text-indigo-300 bg-indigo-950/40 border border-indigo-800/40 rounded-lg px-3 py-2.5 break-all select-all" data-testid="webhook-url">
-          {webhookUrl}
-        </p>
-        {conn?.phone_number_id && (
-          <p className="text-[11px] text-zinc-600">Phone Number ID: <span className="font-mono-code">{conn.phone_number_id}</span></p>
-        )}
-      </div>
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent className="bg-[#0F111A] border-[#23283E]" data-testid="disconnect-confirm-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-display text-zinc-100">Desconectar WhatsApp</AlertDialogTitle>
+            <AlertDialogDescription className="text-zinc-400">
+              Tem certeza que deseja desconectar o WhatsApp do escritório? O Ravi deixará de responder automaticamente,
+              mas todo o histórico de clientes, conversas e processos será mantido. Você pode reconectar quando quiser.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="disconnect-cancel-btn" className="border-[#3F476C] text-zinc-300 bg-transparent">Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={disconnect} data-testid="disconnect-confirm-btn"
+              className="bg-rose-600 hover:bg-rose-500 text-white border-0">Desconectar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
