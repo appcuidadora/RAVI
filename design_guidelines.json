@@ -1,0 +1,236 @@
+{
+  "project_name": "RAVI - Plataforma de Atendimento e Inteligência Jurídica (Legaltech)",
+  "app_type": "saas_app",
+  "theme_preference": "dark-dominant-with-light-support",
+  "design_identity": {
+    "brand_name": "RAVI",
+    "brand_tagline": "Seu cliente pergunta. O Ravi responde. Você só entra quando realmente precisa.",
+    "brand_symbol": "R tecnológico estilizado com corte angular de precisão e brilho de gradiente elétrico (indigo para violeta-ciano)",
+    "aesthetic_references": [
+      "Linear.app (densidade cirúrgica, hairlines 1px #23252a, badges semânticos, keyboard shortcuts kbd, dark canvas #08090b)",
+      "Stripe Dashboard (tipografia nítida, micro-interações refinadas, tabs elegantes, data tables organizadas)",
+      "Vercel (minimalismo brutalista controlado, estados de hover de altíssimo contraste, layout mono-spaced accents)",
+      "Notion (agrupamentos suaves de metadados, callouts de contexto com cantos sutis, breadcrumbs claros)",
+      "ChatGPT (stream de raciocínio de IA, bolhas de chat de alta legibilidade, badges de status de geração)"
+    ],
+    "anti_patterns_strictly_forbidden": [
+      "NUNCA usar balança da justiça, martelo de juiz, colunas gregas/romanas ou estética jurídica arcaica.",
+      "NUNCA abusar de dourado tradicional ou marrom amadeirado de fórum.",
+      "RAVI é uma legaltech premium de IA e automação, e não um escritório tradicional de advocacia.",
+      "Proibido usar gradiente de tela cheia que polua o conteúdo. Gradientes devem ser aplicados estritamente no Logo 'R', badges de destaque de IA e botões primários.",
+      "Proibido usar cor #7351B7 ou #1B93A4 como base."
+    ]
+  },
+  "typography": {
+    "headings": {
+      "font_family": "Plus Jakarta Sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+      "h1": "text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-zinc-100",
+      "h2": "text-2xl sm:text-3xl font-semibold tracking-tight text-zinc-100",
+      "h3": "text-lg sm:text-xl font-semibold tracking-tight text-zinc-200",
+      "h4": "text-sm sm:text-base font-medium text-zinc-300"
+    },
+    "body": {
+      "font_family": "Inter, -apple-system, BlinkMacSystemFont, sans-serif",
+      "size": "text-sm leading-relaxed text-zinc-400",
+      "code_mono": "font-mono text-xs text-indigo-300 bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-800/40"
+    },
+    "eyebrow_and_tags": {
+      "font": "font-mono text-[10px] uppercase tracking-widest text-zinc-400 font-semibold"
+    }
+  },
+  "colors": {
+    "canvas": "#090A0F",
+    "surface_level_1": "#0F111A",
+    "surface_level_2": "#161925",
+    "surface_level_3": "#1E2235",
+    "surface_hover": "#252B42",
+    "border_subtle": "#23283E",
+    "border_active": "#3F476C",
+    "brand_gradient": "linear-gradient(135deg, #3B82F6 0%, #6366F1 50%, #8B5CF6 100%)",
+    "brand_gradient_hover": "linear-gradient(135deg, #2563EB 0%, #4F46E5 50%, #7C3AED 100%)",
+    "brand_glow": "rgba(99, 102, 241, 0.25)",
+    "text_primary": "#F4F5F8",
+    "text_secondary": "#9CA3AF",
+    "text_muted": "#6B7280",
+    "text_highlight": "#C7D2FE",
+    "semantic_status": {
+      "green_resolved": {
+        "badge_bg": "bg-emerald-950/60",
+        "badge_border": "border-emerald-700/50",
+        "text": "text-emerald-400",
+        "dot": "bg-emerald-500",
+        "description": "Ravi resolveu 100% de forma autônoma sem intervenção"
+      },
+      "yellow_monitoring": {
+        "badge_bg": "bg-amber-950/60",
+        "badge_border": "border-amber-700/50",
+        "text": "text-amber-400",
+        "dot": "bg-amber-500",
+        "description": "Em acompanhamento / Dúvida jurídica pendente de validação"
+      },
+      "red_action_needed": {
+        "badge_bg": "bg-rose-950/60",
+        "badge_border": "border-rose-700/50",
+        "text": "text-rose-400",
+        "dot": "bg-rose-500",
+        "description": "Precisa de você / Intervenção imediata solicitada pelo cliente ou IA pausada"
+      }
+    }
+  },
+  "layout_architecture": {
+    "shell_structure": {
+      "type": "App Shell com Sidebar Colapsável fixa à esquerda + Topbar com Breadcrumb e Status do WhatsApp + Conteúdo Central com scroll independente",
+      "sidebar_width": "w-64 shrink-0 border-r border-[#23283E] bg-[#0B0D14]",
+      "topbar_height": "h-14 border-b border-[#23283E] bg-[#0B0D14]/80 backdrop-blur-md px-6 flex items-center justify-between sticky top-0 z-40",
+      "main_container": "flex-1 overflow-y-auto bg-[#090A0F] p-6 lg:p-8 space-y-8"
+    },
+    "key_navigation_items": [
+      { "id": "dashboard", "label": "Visão Geral", "icon": "LayoutDashboard", "path": "/dashboard" },
+      { "id": "conversas", "label": "Central de Conversas", "icon": "MessageSquare", "badge": "3 precisando", "path": "/conversas" },
+      { "id": "processos", "label": "Processos & Andamentos", "icon": "FileText", "path": "/processos" },
+      { "id": "clientes", "label": "Clientes", "icon": "Users", "path": "/clientes" },
+      { "id": "alertas", "label": "Alertas de Intervenção", "icon": "BellAlert", "badge": "2 urgentes", "path": "/alertas" },
+      { "id": "whatsapp", "label": "Conexão WhatsApp", "icon": "PhoneCall", "status": "online", "path": "/whatsapp" },
+      { "id": "equipe", "label": "Equipe & Permissões", "icon": "ShieldCheck", "path": "/equipe" },
+      { "id": "configuracoes", "label": "Configurações do Ravi", "icon": "Sliders", "path": "/configuracoes" }
+    ]
+  },
+  "key_screens_spec": {
+    "dashboard": {
+      "greeting_banner": {
+        "title": "Bom dia, Dr. Carlos",
+        "subtitle": "Hoje o Ravi já atendeu 42 clientes no WhatsApp e economizou aproximadamente 4h 35min do seu time.",
+        "ai_status_pill": "Ravi Ativo em 8 escritórios virtuais • Latência média 1.8s • 98.4% de precisão jurídica"
+      },
+      "kpi_grid": [
+        { "title": "Processos Monitorados", "val": "1.248", "delta": "+14 este mês", "icon": "FileStack" },
+        { "title": "Clientes Atendidos (24h)", "val": "184", "delta": "+28% vs semana passada", "icon": "MessagesSquare" },
+        { "title": "Resolvidos 100% pelo Ravi", "val": "161 (87.5%)", "status": "green", "icon": "CheckCircle2" },
+        { "title": "Precisam de Você", "val": "5 casos", "status": "red", "action": "Ver fila prioritária", "icon": "AlertTriangle" },
+        { "title": "Tempo Estimado Economizado", "val": "34 horas", "delta": "Nesta semana", "icon": "Clock" }
+      ],
+      "interactive_widgets": [
+        "Fila de Atenção Imediata (mini inbox vermelho/amarelo com ação de 1 clique 'Assumir Conversa')",
+        "Volume de Atendimentos por Horário (Gráfico Recharts área azul/índigo)",
+        "Distribuição de Resoluções do Ravi (PieChart ou BarChart categorizado)",
+        "Últimas Atualizações de Processos sincronizadas dos Tribunais (PJe, e-SAJ, Projudi)"
+      ]
+    },
+    "conversas": {
+      "layout": "Inbox de 3 colunas padrão Linear / Slack: Lista de Conversas com filtros de status -> Visualizador de Conversa estilo WhatsApp Web Tech -> Painel Lateral de Contexto Jurídico do Cliente e Processo",
+      "action_bar_controls": [
+        { "action": "pausar_ravi", "label": "Pausar Ravi", "tooltip": "Impede o bot de responder novas mensagens nesta conversa" },
+        { "action": "assumir_conversa", "label": "Assumir Conversa", "tooltip": "Você responde diretamente pelo WhatsApp através do Ravi" },
+        { "action": "retomar_ravi", "label": "Retomar Ravi", "tooltip": "Devolve o controle total ao agente de IA com instruções atualizadas" }
+      ],
+      "message_bubble_styling": {
+        "client": "bg-[#161925] text-zinc-200 border border-[#23283E] rounded-2xl rounded-tl-sm p-3.5 max-w-[80%]",
+        "ravi_ai": "bg-gradient-to-br from-indigo-950/80 to-blue-950/80 border border-indigo-700/40 text-zinc-100 rounded-2xl rounded-tr-sm p-4 max-w-[85%] shadow-lg shadow-indigo-950/30",
+        "lawyer_human": "bg-blue-600/90 text-white rounded-2xl rounded-tr-sm p-3.5 max-w-[80%]"
+      },
+      "ai_reasoning_box": "Componente colapsável 'Como o Ravi formulou esta resposta: 1. Consultou processo 0012934-82.2024; 2. Identificou despacho favorável; 3. Traduziu juridiquês para linguagem clara e acolhedora.'"
+    },
+    "processos": {
+      "features": [
+        "Tabela de alta densidade com busca por número CNJ, cliente, vara ou classe",
+        "Drawer / Página de detalhe com timeline interativa de movimentações",
+        "Card exclusivo 'Como o Ravi conhece este processo' (Knowledge Base injetada: petição inicial, decisões, prazos e orientações personalizadas cadastradas pelo advogado)"
+      ]
+    },
+    "clientes": {
+      "features": [
+        "CRUD completo com modal de criação/edição",
+        "Lista com foto, WhatsApp formatado (+55 11 99999-9999), processos ativos vinculados e status de atendimento",
+        "Histórico de interações automáticas"
+      ]
+    },
+    "alertas": {
+      "features": [
+        "Classificação por prioridade: Crítico (cliente frustrado ou prazo fatal citado), Médio (solicitação de reunião), Informativo (pergunta respondida com sucesso)",
+        "Filtros por 'Resolvido', 'Acompanhamento', 'Intervenção Necessária'"
+      ]
+    },
+    "whatsapp": {
+      "features": [
+        "Status de conexão da instância em tempo real (Conectado / Desconectado / Sincronizando)",
+        "Simulação de QR Code interativo para conexão rápida",
+        "Configuração de horário de atendimento do Ravi (24/7 ou fora do expediente comercial)",
+        "Mensagem de boas-vindas customizável e gatilhos de escalonamento humano"
+      ]
+    },
+    "equipe": {
+      "features": [
+        "Gestão de membros (Sócio Administrador, Advogado Associado, Estagiário, Secretária)",
+        "Permissões granulares por módulo (Quem pode pausar o Ravi, ver processos financeiros, etc.)"
+      ]
+    },
+    "onboarding": {
+      "features": [
+        "Passo a passo inicial do sócio: 1. Nome do Escritório; 2. Conectar WhatsApp; 3. Definir tom de voz do Ravi (Formal, Acolhedor ou Direto); 4. Importar primeiros processos"
+      ]
+    }
+  },
+  "image_urls": {
+    "brand_visuals": [
+      {
+        "url": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2OTV8MHwxfHNlYXJjaHwxfHxtaW5pbWFsJTIwZGFyayUyMHRlY2glMjBkYXNoYm9hcmQlMjBtb2NrdXB8ZW58MHx8fHwxNzg4OTEzNzg1fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Minimal dark tech dashboard display with precision charts",
+        "category": "hero_preview"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1497366754035-f200968a6e72?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzN8MHwxfHNlYXJjaHwxfHxsYXd5ZXIlMjBtb2Rlcm4lMjBvZmZpY2UlMjB0ZWNobm9sb2d5fGVufDB8fHx8MTc4ODkxMzc3Nnww&ixlib=rb-4.1.0&q=85",
+        "description": "Modern high-end glass architecture legal tech office",
+        "category": "office_background"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1487017159836-4e23ece2e4cf?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzN8MHwxfHNlYXJjaHw0fHxsYXd5ZXIlMjBtb2Rlcm4lMjBvZmZpY2UlMjB0ZWNobm9sb2d5fGVufDB8fHx8MTc4ODkxMzc3Nnww&ixlib=rb-4.1.0&q=85",
+        "description": "Minimal laptop workstation in executive boardroom",
+        "category": "workstation_setup"
+      }
+    ],
+    "team_and_avatars": [
+      {
+        "url": "https://images.unsplash.com/photo-1613496701765-97267d26e3df?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODl8MHwxfHNlYXJjaHwyfHxleGVjdXRpdmUlMjBsYXd5ZXIlMjBwb3J0cmFpdCUyMHN0dWRpb3xlbnwwfHx8fDE3ODg5MTM3ODV8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Dr. Carlos Eduardo - Sócio Fundador (Advogado Principal)",
+        "category": "user_avatar_carlos"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1662104935883-e9dd0619eaba?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODl8MHwxfHNlYXJjaHwxfHxleGVjdXRpdmUlMjBsYXd5ZXIlMjBwb3J0cmFpdCUyMHN0dWRpb3xlbnwwfHx8fDE3ODg5MTM3ODV8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Dra. Mariana Rios - Advogada Associada Sênior",
+        "category": "team_member_mariana"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1655048424687-29c152741a90?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODl8MHwxfHNlYXJjaHw0fHxleGVjdXRpdmUlMjBsYXd5ZXIlMjBwb3J0cmFpdCUyMHN0dWRpb3xlbnwwfHx8fDE3ODg5MTM3ODV8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Dr. Fernando Siqueira - Head de Contencioso Cível",
+        "category": "team_member_fernando"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1614786269829-d24616faf56d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODl8MHwxfHNlYXJjaHwzfHxleGVjdXRpdmUlMjBsYXd5ZXIlMjBwb3J0cmFpdCUyMHN0dWRpb3xlbnwwfHx8fDE3ODg5MTM3ODV8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Beatriz Albuquerque - Coordenadora de Atendimento ao Cliente",
+        "category": "team_member_beatriz"
+      }
+    ]
+  },
+  "visual_enhancers": {
+    "subtle_grid_background": "radial-gradient(#1E2338 1px, transparent 1px) with [background-size:24px_24px] opacity-40",
+    "hairline_borders": "1px solid #23283E with hover:border-indigo-500/40 transition-colors duration-200",
+    "ravi_badge_glow": "shadow-[0_0_15px_rgba(99,102,241,0.25)] border border-indigo-500/30 bg-indigo-950/40 text-indigo-300",
+    "code_kbd_style": "text-[11px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 text-zinc-300 border border-zinc-700/60 shadow-sm"
+  },
+  "instructions_to_main_agent": [
+    "Construir toda a aplicação em React (.js / .jsx) garantindo compatibilidade total sem erros de tipagem TypeScript.",
+    "Criar componente do símbolo 'R' tecnológico estilizado: uma letra R geométrica com gradiente azul/índigo/roxo, semelhança a logo da Linear ou Raycast, sem nenhuma alusão arcaica a balanças ou martelos.",
+    "Incluir data-testid em TODOS os botões, links, abas, inputs e cards principais (ex: data-testid='sidebar-link-conversas', data-testid='btn-pausar-ravi', data-testid='kpi-card-processos').",
+    "Garantir estado interativo completo: alternar telas na sidebar, simular pausa/retomada do Ravi com feedback sonner toast, trocar filtros de status de conversas, e abrir modal de 'Como o Ravi conhece este processo'.",
+    "Manter o idioma estritamente em Português do Brasil (pt-BR) com tom profissional de alta tecnologia jurídica (evitar juridiquês empoeirado, focar em clareza, velocidade e segurança).",
+    "Implementar barra superior com status do WhatsApp: bolinha pulsante verde 'Instância Ativa (55 11 98765-4321)' com botão de reconectar ou configurar.",
+    "Integrar Sonner para toasts de notificação ao assumir atendimento, salvar processo ou disparar alerta."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Proibido usar transições genéricas como 'transition: all' para evitar travamento em transforms.",
+    "Nunca centralizar o container raiz do app com text-align: center.",
+    "Respeitar o APCA/WCAG contrast em textos pequenos e badges.",
+    "Containers com borda devem sempre possuir padding interno generoso (p-5, p-6 ou p-8).",
+    "Usar botões com cantos modernos refinados (rounded-lg ou rounded-xl), nunca botões padrão desprovidos de estilo."
+  ]
+}

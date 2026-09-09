@@ -1,0 +1,30 @@
+{
+  "summary": "First iteration testing of RAVI MVP (SaaS multi-tenant WhatsApp/AI para escritórios de advocacia). Backend 21/21 tests passing (auth, dashboard, clientes, processos CNJ parsing, conversas simulation + escalation + pause/takeover/resume, alertas, equipe, isolamento multi-tenant, forgot-password idempotência, WhatsApp webhook verify tokens, WhatsApp status Meta pendente). Frontend UI validated with Playwright: login com credenciais do admin, saudação por horário 'Bom dia/tarde/noite, Dr(a). Carlos.', KPIs 50/63/41/2/3h42 corretos, ausência da frase 'resolvidos pela IA', motto 'O Ravi olha por você' presente, refresh preservado em todas as 7 rotas protegidas (/clientes /processos /conversas /alertas /equipe /configuracoes /whatsapp), conversa demo com escalação vermelha, pausar/assumir/retomar Ravi, alertas com Resolver, equipe com add-member-btn, /whatsapp mostrando 'WhatsApp não conectado' + painel Meta pendente + URL do webhook, guest→rota protegida redireciona para /login, /esqueci-senha carrega OK.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard subtitle", "issues": ["Subtítulo 'O Ravi cuidou do atendimento. Você cuida do que precisa de você.' contém erro semântico: 'Você cuida do que precisa de você' (deveria ser algo como 'do que precisa de você' → 'do que só você pode cuidar'). Confirmar cópia com o time de conteúdo."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_ravi.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Revisar cópia do subtítulo do Dashboard: 'Você cuida do que precisa de você.' — parece ter um erro de redação; verificar se deveria ser 'do que precisa de você' → 'do que precisa da sua atenção' ou similar."
+  ],
+  "critical_code_review_comments": [
+    "server.py: usa @app.on_event('startup'/'shutdown') que está deprecated no FastAPI atual; migrar para lifespan handler futuramente (não bloqueante).",
+    "auth_routes.set_auth_cookies com samesite='none'+secure=True está OK para cross-site preview, mas em produção com FRONTEND_URL definido considere restringir CORS_ORIGINS em vez de fallback '*' (em .env atual está '*'). CORS com allow_credentials=True e allow_origins=['*'] é permitido pelo Starlette com aviso, mas melhor prática é lista explícita.",
+    "core_routes.simulate_client_message chama handle_inbound_message que pode gastar tempo de LLM sem timeout explícito; considere timeout no cliente HTTP do LLM.",
+    "seed.py detecção de 'demo_seeded' já existe; passa idempotência e atualiza senha se mudar — bom.",
+    "pipeline.py: dashboard KPI 'resolvidos' conta audit_logs event='auto_resolved' — funciona; office demo tem 'demo_metrics' que sobrepõe (bom para o MVP)."
+  ],
+  "updated_files": ["/app/backend/tests/test_ravi.py"],
+  "success_rate": {"backend": "100% (21/21)", "frontend": "100% (fluxos críticos)"},
+  "test_credentials": "construcaovilanova@gmail.com / Ravi@2026 (SOCIO_ADMIN, Silva Advocacia). Webhook verify token: ravi-wh-verify-9f2c4e7a1b3d5f608192a3b5c7d9e1f2",
+  "seed_data_creation": "Nenhuma criação adicional; usados os seeds existentes (Carlos Eduardo, processo 1001234-56.2025.8.26.0100, conversa demo, alerta vermelho). Testes criam/removem clientes/membros com prefixo TEST_.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend está estável em https://ravi-client.preview.emergentagent.com/api. Rodar `pytest /app/backend/tests/test_ravi.py -v` para regressão. Meta ainda não configurada (proposital) — /whatsapp deve mostrar painel pendente. Escalação para vermelho é acionada por palavras como 'acelerar' (classify_message). O KPI da dashboard leva ~1-2s pois faz GET /dashboard/stats no useEffect — em Playwright, esperar >2s antes de asserção de valores. O botão takeover-btn só é visível quando ai_enabled=true e human_control=false — depois de Pausar Ravi só o resume-ravi-btn aparece (comportamento correto).",
+  "rca of the issue": "N/A — nenhum bug funcional encontrado nesta iteração."
+}

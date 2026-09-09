@@ -1,0 +1,146 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { api, apiError } from "@/lib/api";
+import { toast } from "sonner";
+import { Plus, ChevronRight, Lock } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+const EMPTY = { number: "", client_id: "", status: "Em andamento", ultima_movimentacao: "" };
+
+export default function Processos() {
+  const [processes, setProcesses] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(EMPTY);
+  const [search, setSearch] = useState("");
+
+  const load = () => api.get("/processes").then((r) => setProcesses(r.data)).catch(() => {});
+  useEffect(() => {
+    load();
+    api.get("/clients").then((r) => setClients(r.data)).catch(() => {});
+  }, []);
+
+  const save = async (e) => {
+    e.preventDefault();
+    try {
+      const { data } = await api.post("/processes", { ...form, client_id: form.client_id || null });
+      setOpen(false);
+      setForm(EMPTY);
+      if (data.tribunal) {
+        toast.success(`Processo identificado: ${data.tribunal}`);
+      } else {
+        toast.success("Processo cadastrado");
+      }
+      load();
+    } catch (err) {
+      toast.error(apiError(err));
+    }
+  };
+
+  const filtered = processes.filter((p) =>
+    (p.numero_formatado || p.number || "").includes(search) ||
+    (p.client_name || "").toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div className="p-6 lg:p-8 space-y-6" data-testid="processos-page">
+      <div className="flex items-center justify-between fade-up">
+        <div>
+          <h1 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight text-zinc-100">Processos</h1>
+          <p className="text-sm text-zinc-500 mt-1">Informe o número. O Ravi identifica tribunal e segmento automaticamente.</p>
+        </div>
+        <Button onClick={() => setOpen(true)} data-testid="add-process-btn" className="brand-gradient brand-gradient-hover text-white border-0">
+          <Plus size={16} className="mr-1.5" /> Novo processo
+        </Button>
+      </div>
+
+      <Input placeholder="Buscar por número CNJ ou cliente…" value={search} onChange={(e) => setSearch(e.target.value)}
+        data-testid="processes-search-input" className="max-w-sm bg-[#0F111A] border-[#23283E]" />
+
+      <div className="rounded-xl border border-[#23283E] bg-[#0F111A] overflow-hidden fade-up" data-testid="processes-table">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-[#23283E] text-left">
+              <th className="px-5 py-3 font-mono-code text-[10px] uppercase tracking-widest text-zinc-500">Número</th>
+              <th className="px-5 py-3 font-mono-code text-[10px] uppercase tracking-widest text-zinc-500 hidden md:table-cell">Tribunal</th>
+              <th className="px-5 py-3 font-mono-code text-[10px] uppercase tracking-widest text-zinc-500 hidden sm:table-cell">Cliente</th>
+              <th className="px-5 py-3 font-mono-code text-[10px] uppercase tracking-widest text-zinc-500">Situação</th>
+              <th className="px-5 py-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr><td colSpan={5} className="px-5 py-10 text-center text-zinc-500" data-testid="processes-empty">
+                Nenhum processo cadastrado ainda.
+              </td></tr>
+            )}
+            {filtered.map((p) => (
+              <tr key={p.id} className="border-b border-[#23283E]/50 hover:bg-[#161925]/50 transition-colors duration-150" data-testid={`process-row-${p.id}`}>
+                <td className="px-5 py-3.5">
+                  <span className="font-mono-code text-xs text-indigo-300">{p.numero_formatado || p.number}</span>
+                  {p.acesso_restrito && (
+                    <span className="ml-2 inline-flex items-center gap-1 text-[10px] text-amber-400"><Lock size={10} /> acesso restrito</span>
+                  )}
+                </td>
+                <td className="px-5 py-3.5 text-zinc-400 text-xs hidden md:table-cell">{p.tribunal || "—"}</td>
+                <td className="px-5 py-3.5 text-zinc-300 hidden sm:table-cell">{p.client_name || "—"}</td>
+                <td className="px-5 py-3.5 text-zinc-300">{p.status}</td>
+                <td className="px-5 py-3.5 text-right">
+                  <Link to={`/processos/${p.id}`} data-testid={`open-process-${p.id}`}
+                    className="inline-flex items-center text-zinc-500 hover:text-zinc-200 transition-colors duration-150">
+                    <ChevronRight size={16} />
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="bg-[#0F111A] border-[#23283E]" data-testid="process-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-display text-zinc-100">Novo processo</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={save} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-zinc-400 text-xs">Número do processo (CNJ)</Label>
+              <Input required value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })}
+                data-testid="process-number-input" placeholder="1001234-56.2025.8.26.0100"
+                className="bg-[#090A0F] border-[#23283E] font-mono-code text-xs" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-zinc-400 text-xs">Cliente</Label>
+              <Select value={form.client_id} onValueChange={(v) => setForm({ ...form, client_id: v })}>
+                <SelectTrigger data-testid="process-client-select" className="bg-[#090A0F] border-[#23283E]">
+                  <SelectValue placeholder="Vincular cliente (opcional)" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#0F111A] border-[#23283E]">
+                  {clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-zinc-400 text-xs">Situação</Label>
+                <Input value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
+                  data-testid="process-status-input" className="bg-[#090A0F] border-[#23283E]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-zinc-400 text-xs">Última movimentação</Label>
+                <Input value={form.ultima_movimentacao} onChange={(e) => setForm({ ...form, ultima_movimentacao: e.target.value })}
+                  data-testid="process-lastmov-input" placeholder="18/08/2026" className="bg-[#090A0F] border-[#23283E]" />
+              </div>
+            </div>
+            <Button type="submit" data-testid="process-save-btn" className="w-full brand-gradient brand-gradient-hover text-white border-0">
+              Cadastrar processo
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
