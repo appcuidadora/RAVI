@@ -45,6 +45,17 @@ async def fetch_phone_display(phone_number_id: str, token: str) -> str:
     return ""
 
 
+async def get_media_bytes(media_id: str, token: str) -> tuple:
+    """Baixa mídia (áudio/imagem) da Meta: primeiro resolve a URL, depois baixa com o token."""
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
+        r = await c.get(f"{graph_base()}/{media_id}", headers={"Authorization": f"Bearer {token}"})
+        r.raise_for_status()
+        info = r.json()
+        r2 = await c.get(info["url"], headers={"Authorization": f"Bearer {token}"})
+        r2.raise_for_status()
+        return r2.content, info.get("mime_type", "audio/ogg")
+
+
 async def graph_send_text(connection: dict, to: str, body: str) -> dict:
     """Envia mensagem de texto via Cloud API. Retorna resposta da Meta ou lança exceção."""
     payload = {

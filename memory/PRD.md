@@ -36,7 +36,8 @@ SOCIO_ADMIN (total), ADVOGADO_ASSOCIADO, ESTAGIARIO, SECRETARIA_ATENDIMENTO — 
 - Feature 1: cadastro inline de cliente no processo + upload de PDF (object storage Emergent + extração pypdf) — IA lê o documento e responde com o conteúdo (validado: audiência 20/10 respondida a partir do PDF)
 - Feature 2: valor da causa + forma de pagamento + cobranças no processo; cron diário `.emergent/crons.yml` (12:00 UTC = 9h BRT) → POST /api/cron/billing-reminders (Bearer WEBHOOK_CRON_SECRET, idempotente por run_id) envia lembretes 5 dias antes (janela com retry) e no dia via WhatsApp; flag só marcada com entrega confirmada
 - Feature 3: memória de conversa com as últimas 50 mensagens no contexto da IA
-- Regressão: `pytest /app/backend/tests/`
+- Feature 4 (áudio): webhook aceita type=audio → baixa mídia via Graph API → ffmpeg ogg→mp3 → Whisper whisper-1 (pt) → pipeline normal; msg salva com kind='audio' e badge "áudio transcrito" na UI; processamento do webhook em BackgroundTasks (ack rápido à Meta); demais tipos (imagem/vídeo/doc/sticker) são ignorados com log
+- Regressão: `pytest /app/backend/tests/ -n0`
 
 ## Pendências para produção
 - P0: credenciais da Meta App (META_APP_ID, META_APP_SECRET, META_CONFIG_ID) para ativar Embedded Signup real; App Review Meta (whatsapp_business_management/messaging); registrar webhook na Meta com a URL pública

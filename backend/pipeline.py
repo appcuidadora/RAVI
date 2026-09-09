@@ -16,12 +16,13 @@ def now_iso() -> str:
 
 async def save_message(office_id: str, conversation_id: str, sender: str, text: str,
                        risk_level: str = None, sender_user_id: str = None,
-                       meta_message_id: str = None, delivered: bool = False) -> dict:
+                       meta_message_id: str = None, delivered: bool = False,
+                       kind: str = "text") -> dict:
     msg = {
         "id": uuid.uuid4().hex, "office_id": office_id, "conversation_id": conversation_id,
         "sender": sender, "sender_user_id": sender_user_id, "text": text,
         "risk_level": risk_level, "meta_message_id": meta_message_id,
-        "delivered": delivered, "created_at": now_iso(),
+        "delivered": delivered, "kind": kind, "created_at": now_iso(),
     }
     await db.messages.insert_one(msg)
     await db.conversations.update_one({"id": conversation_id},
@@ -44,7 +45,7 @@ async def create_alert(office_id: str, alert_type: str, title: str, reason: str 
 
 async def handle_inbound_message(office_id: str, phone: str, text: str,
                                  connection: dict = None, source: str = "whatsapp",
-                                 meta_message_id: str = None) -> dict:
+                                 meta_message_id: str = None, kind: str = "text") -> dict:
     """Pipeline central: webhook da Meta e simulação passam por aqui.
     Meta → webhook → phone_number_id → WhatsAppConnection → office_id → cliente → conversa → RAVI."""
     norm = normalize_phone(phone)
@@ -69,7 +70,7 @@ async def handle_inbound_message(office_id: str, phone: str, text: str,
                                conversation_id=conv["id"])
             await audit(office_id, "unidentified_contact", conversation_id=conv["id"], phone=norm)
 
-    await save_message(office_id, conv["id"], "client", text, meta_message_id=meta_message_id)
+    await save_message(office_id, conv["id"], "client", text, meta_message_id=meta_message_id, kind=kind)
     await audit(office_id, "message_received", conversation_id=conv["id"],
                 client_id=client["id"] if client else None, text=text[:200])
 

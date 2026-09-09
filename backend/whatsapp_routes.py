@@ -5,7 +5,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Request, Query, Depends
+from fastapi import APIRouter, HTTPException, Request, Query, Depends, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from database import db
@@ -126,7 +126,7 @@ async def webhook_verify(hub_mode: str = Query(None, alias="hub.mode"),
 
 
 @router.post("/webhooks/whatsapp")
-async def webhook_receive(request: Request):
+async def webhook_receive(request: Request, background_tasks: BackgroundTasks):
     raw = await request.body()
     app_secret = os.environ.get("META_APP_SECRET", "")
     if app_secret:
@@ -155,13 +155,39 @@ async def webhook_receive(request: Request):
                 logger.warning(f"Webhook: phone_number_id desconhecido {phone_number_id}")
                 continue
             for msg in value.get("messages", []):
-                if msg.get("type") != "text":
-                    continue
-                exists = await db.messages.find_one({"meta_message_id": msg.get("id")})
-                if exists:
-                    continue  # idempotência: Meta reenvia eventos
-                text = (msg.get("text") or {}).get("body", "")
-                await handle_inbound_message(connection["office_id"], msg.get("from", ""),
-                                             text, connection=connection,
-                                             meta_message_id=msg.get("id"))
+                # processa em background para dar ack rápido à Meta (transcrição de áudio pode demorar)
+                background_tasks.add_task(process_meta_message, connection, msg)
     return {"ok": True}
+
+
+async def process_meta_message(connection: dict, msg: dict):
+    try:
+        mtype = msg.get("type")
+        if mtype not in ("text", "audio"):
+            logger.info(f"Webhook: tipo de mensagem não suportado ({mtype})")
+            return
+        if await db.messages.find_one({"meta_message_id": msg.get("id")}):
+            return  # idempotência: Meta reenvia eventos
+        kind = "text"
+        if mtype == "text":
+            text = (msg.get("text") or {}).get("body", "")
+        else:
+            media_id = (msg.get("audio") or {}).get("id")
+            if not media_id:
+                return
+            try:
+                from whatsapp_meta import get_media_bytes
+                from ai import transcribe_audio
+                audio_bytes, _mime = await get_media_bytes(media_id, connection.get("access_token", ""))
+                text = await transcribe_audio(audio_bytes)
+                kind = "audio"
+                if not text:
+                    return
+            except Exception as e:
+                logger.error(f"Falha ao transcrever áudio {media_id}: {e}")
+                return
+        await handle_inbound_message(connection["office_id"], msg.get("from", ""),
+                                     text, connection=connection,
+                                     meta_message_id=msg.get("id"), kind=kind)
+    except Exception as e:
+        logger.error(f"Webhook processamento falhou: {e}")

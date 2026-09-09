@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, apiError } from "@/lib/api";
 import { toast } from "sonner";
-import { Pause, Play, UserCheck, Send, Bot, Link2, UserPlus } from "lucide-react";
+import { Pause, Play, UserCheck, Send, Bot, Link2, UserPlus, Mic } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +26,11 @@ function Bubble({ m }) {
             ? "bg-gradient-to-br from-indigo-950/80 to-blue-950/80 border border-indigo-700/40 text-zinc-100 rounded-2xl rounded-tr-sm p-4 max-w-[85%] shadow-lg shadow-indigo-950/30"
             : "bg-blue-600/90 text-white rounded-2xl rounded-tr-sm p-3.5 max-w-[80%]"
       }>
+        {m.kind === "audio" && (
+          <p className="flex items-center gap-1.5 text-[10px] font-mono-code uppercase tracking-widest text-zinc-500 mb-1.5">
+            <Mic size={11} /> áudio transcrito
+          </p>
+        )}
         {isRavi && (
           <p className="flex items-center gap-1.5 text-[10px] font-mono-code uppercase tracking-widest text-indigo-300 mb-1.5">
             <Bot size={11} /> Ravi {m.risk_level === "red" ? "• escalonado" : ""}

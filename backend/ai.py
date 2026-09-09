@@ -29,6 +29,39 @@ UNKNOWN_REPLY = (
 )
 
 
+async def transcribe_audio(data: bytes) -> str:
+    """Transcreve áudio do WhatsApp (ogg/opus) para texto pt-BR via Whisper.
+    A lib só aceita mp3/mp4/mpeg/mpga/m4a/wav/webm — converte o ogg com ffmpeg antes."""
+    import io
+    import subprocess
+    import tempfile
+    from emergentintegrations.llm.openai import OpenAISpeechToText
+    src = mp3 = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as fin:
+            fin.write(data)
+            src = fin.name
+        mp3 = src[:-4] + ".mp3"
+        subprocess.run(["ffmpeg", "-y", "-i", src, "-vn", "-acodec", "libmp3lame", "-q:a", "4", mp3],
+                       check=True, capture_output=True, timeout=60)
+        with open(mp3, "rb") as f:
+            payload = f.read()
+    finally:
+        for p in (src, mp3):
+            if p:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+    stt = OpenAISpeechToText(api_key=os.environ["EMERGENT_LLM_KEY"])
+    buf = io.BytesIO(payload)
+    buf.name = "audio.mp3"
+    resp = await stt.transcribe(
+        file=buf, model="whisper-1", response_format="json", language="pt",
+        prompt="Mensagem de voz de um cliente de escritório de advocacia em português do Brasil.")
+    return (getattr(resp, "text", "") or "").strip()
+
+
 def classify_message(text: str) -> tuple:
     """Motor de decisão do RAVI: VERDE (responde), AMARELO (responde + acompanha), VERMELHO (humano)."""
     t = (text or "").lower()
