@@ -94,7 +94,8 @@ async def handle_inbound_message(office_id: str, phone: str, text: str,
                            conversation_id=conv["id"], client_id=client["id"])
         await db.conversations.update_one({"id": conv["id"]}, {"$set": {"risk_level": "red"}})
     else:
-        history = await db.messages.find({"conversation_id": conv["id"]}, {"_id": 0}).sort("created_at", -1).to_list(6)
+        history = await db.messages.find({"conversation_id": conv["id"]}, {"_id": 0}).sort("created_at", -1).to_list(50)
+        history.reverse()
         reply = await generate_ravi_reply(office, client, process, history, text)
         if level == "yellow":
             await create_alert(office_id, "monitoring", "Acompanhamento", reason,

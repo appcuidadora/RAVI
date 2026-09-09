@@ -269,7 +269,7 @@ class TestWhatsApp:
                                  "hub.challenge": "12345"})
         assert r.status_code == 403
 
-    def test_status_shows_meta_pending(self, admin_session):
+    def test_status_shows_meta_connected(self, admin_session):
         r = admin_session.get(f"{API}/whatsapp/status")
         assert r.status_code == 200
         d = r.json()

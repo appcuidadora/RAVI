@@ -70,14 +70,27 @@ def fallback_reply(client_name: str, process: dict) -> str:
 
 async def generate_ravi_reply(office: dict, client: dict, process: dict, history: list, text: str) -> str:
     tone = (office or {}).get("tone", "acolhedor")
+    hist_lines = []
+    for m in (history or [])[-50:]:
+        who = {"client": "Cliente", "ravi": "Ravi", "user": "Advogado"}.get(m.get("sender"), "Cliente")
+        hist_lines.append(f"{who}: {m.get('text', '')}")
+    hist_txt = "\n".join(hist_lines) or "(sem mensagens anteriores)"
+    docs_txt = ""
+    if process:
+        docs = [d for d in (process.get("documentos") or []) if d.get("texto")]
+        if docs:
+            joined = "\n---\n".join(f"Documento '{d['filename']}':\n{d['texto'][:3500]}" for d in docs[:2])
+            docs_txt = (f"\nCONTEÚDO DE DOCUMENTOS DO PROCESSO (PDFs fornecidos pelo escritório):\n{joined}\n")
     system = (
         f"Você é o RAVI, assistente de atendimento do escritório de advocacia '{(office or {}).get('name', '')}'. "
         f"Tom de voz: {tone}. Responda sempre em português do Brasil, de forma curta (máx. 4 frases), clara e humana, sem juridiquês. "
         "REGRAS INEGOCIÁVEIS: use apenas as informações do contexto abaixo; nunca invente dados, datas ou decisões; "
         "nunca dê orientação jurídica, opinião estratégica ou prometa resultados; "
-        "se a informação não estiver no contexto, diga que vai confirmar com o responsável pelo processo.\n\n"
+        "se a informação não estiver no contexto, diga que vai confirmar com o responsável pelo processo; "
+        "leve em conta o histórico da conversa para não repetir informações nem saudações.\n\n"
         f"CONTEXTO DO CLIENTE: {client.get('name', 'Cliente')}\n"
-        f"CONTEXTO DO PROCESSO:\n{_process_context(process)}"
+        f"CONTEXTO DO PROCESSO:\n{_process_context(process)}\n{docs_txt}\n"
+        f"HISTÓRICO DA CONVERSA (do mais antigo ao mais recente):\n{hist_txt}"
     )
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage

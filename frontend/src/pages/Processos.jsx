@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-const EMPTY = { number: "", client_id: "", status: "Em andamento", ultima_movimentacao: "" };
+const EMPTY = { number: "", client_id: "", status: "Em andamento", ultima_movimentacao: "", valor_causa: "", forma_pagamento: "" };
 
 export default function Processos() {
   const [processes, setProcesses] = useState([]);
@@ -17,6 +17,8 @@ export default function Processos() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(EMPTY);
   const [search, setSearch] = useState("");
+  const [newClient, setNewClient] = useState({ name: "", phone: "" });
+  const [cobrancas, setCobrancas] = useState([]);
 
   const load = () => api.get("/processes").then((r) => setProcesses(r.data)).catch(() => {});
   useEffect(() => {
@@ -27,9 +29,21 @@ export default function Processos() {
   const save = async (e) => {
     e.preventDefault();
     try {
-      const { data } = await api.post("/processes", { ...form, client_id: form.client_id || null });
+      const isNew = form.client_id === "__new__";
+      const payload = {
+        number: form.number, status: form.status, ultima_movimentacao: form.ultima_movimentacao,
+        client_id: isNew ? null : form.client_id || null,
+        new_client_name: isNew ? newClient.name : null,
+        new_client_phone: isNew ? newClient.phone : null,
+        valor_causa: form.valor_causa ? Number(form.valor_causa) : null,
+        forma_pagamento: form.forma_pagamento || "",
+        cobrancas: cobrancas.filter((c) => c.valor && c.data_vencimento),
+      };
+      const { data } = await api.post("/processes", payload);
       setOpen(false);
       setForm(EMPTY);
+      setNewClient({ name: "", phone: "" });
+      setCobrancas([]);
       if (data.tribunal) {
         toast.success(`Processo identificado: ${data.tribunal}`);
       } else {
@@ -119,10 +133,25 @@ export default function Processos() {
                   <SelectValue placeholder="Vincular cliente (opcional)" />
                 </SelectTrigger>
                 <SelectContent className="bg-[#0F111A] border-[#23283E]">
+                  <SelectItem value="__new__" className="text-indigo-300">+ Cadastrar novo cliente</SelectItem>
                   {clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
+            {form.client_id === "__new__" && (
+              <div className="grid grid-cols-2 gap-3 rounded-lg border border-indigo-800/40 bg-indigo-950/20 p-3" data-testid="new-client-fields">
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-xs">Nome do cliente</Label>
+                  <Input required value={newClient.name} onChange={(e) => setNewClient({ ...newClient, name: e.target.value })}
+                    data-testid="process-new-client-name" placeholder="Carlos Eduardo" className="bg-[#090A0F] border-[#23283E]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-xs">WhatsApp</Label>
+                  <Input required value={newClient.phone} onChange={(e) => setNewClient({ ...newClient, phone: e.target.value })}
+                    data-testid="process-new-client-phone" placeholder="+55 11 98765-4321" className="bg-[#090A0F] border-[#23283E]" />
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-zinc-400 text-xs">Situação</Label>
@@ -133,6 +162,51 @@ export default function Processos() {
                 <Label className="text-zinc-400 text-xs">Última movimentação</Label>
                 <Input value={form.ultima_movimentacao} onChange={(e) => setForm({ ...form, ultima_movimentacao: e.target.value })}
                   data-testid="process-lastmov-input" placeholder="18/08/2026" className="bg-[#090A0F] border-[#23283E]" />
+              </div>
+            </div>
+            <div className="pt-2 border-t border-[#23283E] space-y-3">
+              <p className="font-mono-code text-[10px] uppercase tracking-widest text-zinc-500">Financeiro (opcional)</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-xs">Valor da causa (R$)</Label>
+                  <Input type="number" step="0.01" min="0" value={form.valor_causa}
+                    onChange={(e) => setForm({ ...form, valor_causa: e.target.value })}
+                    data-testid="process-valor-input" placeholder="15000.00" className="bg-[#090A0F] border-[#23283E]" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-zinc-400 text-xs">Forma de pagamento</Label>
+                  <Select value={form.forma_pagamento} onValueChange={(v) => setForm({ ...form, forma_pagamento: v })}>
+                    <SelectTrigger data-testid="process-pagamento-select" className="bg-[#090A0F] border-[#23283E]">
+                      <SelectValue placeholder="Selecionar" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#0F111A] border-[#23283E]">
+                      <SelectItem value="PIX">PIX</SelectItem>
+                      <SelectItem value="Boleto">Boleto</SelectItem>
+                      <SelectItem value="Cartão de crédito">Cartão de crédito</SelectItem>
+                      <SelectItem value="Transferência">Transferência</SelectItem>
+                      <SelectItem value="Dinheiro">Dinheiro</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-zinc-400 text-xs">Cobranças — lembrete automático no WhatsApp 5 dias antes e no dia</Label>
+                  <button type="button" onClick={() => setCobrancas([...cobrancas, { valor: "", data_vencimento: "", descricao: "" }])}
+                    data-testid="add-cobranca-btn" className="text-xs text-indigo-400 hover:text-indigo-300">+ adicionar</button>
+                </div>
+                {cobrancas.map((c, i) => (
+                  <div key={i} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center" data-testid={`cobranca-row-${i}`}>
+                    <Input type="number" step="0.01" placeholder="Valor R$" value={c.valor}
+                      onChange={(e) => setCobrancas(cobrancas.map((x, j) => j === i ? { ...x, valor: e.target.value } : x))}
+                      data-testid={`cobranca-valor-${i}`} className="bg-[#090A0F] border-[#23283E]" />
+                    <Input type="date" value={c.data_vencimento}
+                      onChange={(e) => setCobrancas(cobrancas.map((x, j) => j === i ? { ...x, data_vencimento: e.target.value } : x))}
+                      data-testid={`cobranca-data-${i}`} className="bg-[#090A0F] border-[#23283E] w-[150px]" />
+                    <button type="button" onClick={() => setCobrancas(cobrancas.filter((_, j) => j !== i))}
+                      data-testid={`cobranca-remove-${i}`} className="text-zinc-600 hover:text-rose-400 px-1">×</button>
+                  </div>
+                ))}
               </div>
             </div>
             <Button type="submit" data-testid="process-save-btn" className="w-full brand-gradient brand-gradient-hover text-white border-0">

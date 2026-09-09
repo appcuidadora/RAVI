@@ -1,16 +1,69 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { api } from "@/lib/api";
-import { ArrowLeft, Check, Lock, FileText } from "lucide-react";
+import { api, apiError } from "@/lib/api";
+import { toast } from "sonner";
+import { ArrowLeft, Check, Lock, FileText, Upload, Download, Banknote } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export default function ProcessoDetalhe() {
   const { id } = useParams();
   const [proc, setProc] = useState(null);
+  const fileRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const [newCob, setNewCob] = useState({ valor: "", data_vencimento: "", descricao: "" });
 
-  useEffect(() => {
-    api.get(`/processes/${id}`).then((r) => setProc(r.data)).catch(() => {});
-  }, [id]);
+  const reload = () => api.get(`/processes/${id}`).then((r) => setProc(r.data)).catch(() => {});
+  useEffect(() => { reload(); }, [id]); // eslint-disable-line
+
+  const uploadPdf = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      await api.post(`/processes/${id}/document`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      toast.success("PDF anexado — a IA já consegue ler este documento");
+      reload();
+    } catch (err) {
+      toast.error(apiError(err, "Falha ao anexar PDF"));
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
+
+  const downloadPdf = async (d) => {
+    try {
+      const r = await api.get(`/processes/${id}/document/${d.id}`, { responseType: "blob" });
+      window.open(URL.createObjectURL(r.data), "_blank");
+    } catch {
+      toast.error("Falha ao baixar documento");
+    }
+  };
+
+  const addCobranca = async () => {
+    if (!newCob.valor || !newCob.data_vencimento) return;
+    try {
+      await api.patch(`/processes/${id}`, {
+        cobrancas: [...(proc.cobrancas || []),
+          { valor: Number(newCob.valor), data_vencimento: newCob.data_vencimento, descricao: newCob.descricao }],
+      });
+      setNewCob({ valor: "", data_vencimento: "", descricao: "" });
+      toast.success("Cobrança adicionada — lembretes automáticos ativados");
+      reload();
+    } catch (err) { toast.error(apiError(err)); }
+  };
+
+  const markPaid = async (c) => {
+    try {
+      await api.post(`/processes/${id}/cobrancas/${c.id}/pago`);
+      toast.success("Cobrança marcada como paga");
+      reload();
+    } catch (err) { toast.error(apiError(err)); }
+  };
 
   if (!proc) return <div className="p-8 text-zinc-500" data-testid="process-loading">Carregando…</div>;
 
@@ -76,6 +129,69 @@ export default function ProcessoDetalhe() {
                   <span className="text-xs text-zinc-300">{f}</span>
                 </div>
               ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[#23283E] bg-[#0F111A] p-5" data-testid="process-documents-card">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="font-mono-code text-[10px] uppercase tracking-widest text-zinc-500">Documentos do processo</h4>
+              <button onClick={() => fileRef.current?.click()} data-testid="upload-pdf-btn"
+                className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors duration-150">
+                <Upload size={12} /> Anexar PDF
+              </button>
+              <input ref={fileRef} type="file" accept="application/pdf" className="hidden" onChange={uploadPdf} data-testid="upload-pdf-input" />
+            </div>
+            {(proc.documentos || []).length === 0 && (
+              <p className="text-xs text-zinc-600">Anexe o PDF do processo — a IA lê o conteúdo e usa nas respostas ao cliente.</p>
+            )}
+            {(proc.documentos || []).map((d) => (
+              <div key={d.id} className="flex items-center justify-between py-1.5" data-testid={`document-${d.id}`}>
+                <span className="text-xs text-zinc-300 truncate flex items-center gap-2">
+                  <FileText size={11} className="text-zinc-600 shrink-0" /> {d.filename}
+                </span>
+                <button onClick={() => downloadPdf(d)} data-testid={`download-${d.id}`}
+                  className="text-zinc-500 hover:text-zinc-200 transition-colors duration-150 shrink-0 ml-2"><Download size={13} /></button>
+              </div>
+            ))}
+            {uploading && <p className="text-[11px] text-indigo-300 mt-2 pulse-dot">Enviando e lendo documento…</p>}
+          </div>
+
+          <div className="rounded-xl border border-[#23283E] bg-[#0F111A] p-5" data-testid="process-billing-card">
+            <h4 className="font-mono-code text-[10px] uppercase tracking-widest text-zinc-500 mb-3 flex items-center gap-2">
+              <Banknote size={12} /> Financeiro
+            </h4>
+            {proc.valor_causa != null && (
+              <p className="text-sm text-zinc-200">Valor da causa: <span className="font-semibold">R$ {Number(proc.valor_causa).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span></p>
+            )}
+            {proc.forma_pagamento && <p className="text-xs text-zinc-500 mt-0.5">Pagamento: {proc.forma_pagamento}</p>}
+            <div className="mt-3 space-y-2">
+              {(proc.cobrancas || []).length === 0 && (
+                <p className="text-xs text-zinc-600">Sem cobranças. Adicione parcelas e o Ravi lembra o cliente no WhatsApp 5 dias antes e no dia do vencimento.</p>
+              )}
+              {(proc.cobrancas || []).map((c) => (
+                <div key={c.id} className="flex items-center justify-between rounded-lg border border-[#23283E] bg-[#090A0F] px-3 py-2" data-testid={`cobranca-${c.id}`}>
+                  <div className="min-w-0">
+                    <p className="text-xs text-zinc-200">
+                      R$ {Number(c.valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 })} • {new Date(c.data_vencimento + "T12:00:00").toLocaleDateString("pt-BR")}
+                    </p>
+                    {c.descricao && <p className="text-[10px] text-zinc-600 truncate">{c.descricao}</p>}
+                  </div>
+                  {c.status === "pago"
+                    ? <span className="text-[10px] text-emerald-400 shrink-0">pago</span>
+                    : <button onClick={() => markPaid(c)} data-testid={`cobranca-pago-${c.id}`}
+                        className="text-[10px] text-indigo-400 hover:text-indigo-300 shrink-0 transition-colors duration-150">marcar pago</button>}
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-[1fr_auto_auto] gap-2 items-center mt-3">
+              <Input type="number" step="0.01" placeholder="Nova parcela R$" value={newCob.valor}
+                onChange={(e) => setNewCob({ ...newCob, valor: e.target.value })}
+                data-testid="new-cobranca-valor" className="bg-[#090A0F] border-[#23283E] h-8 text-xs" />
+              <Input type="date" value={newCob.data_vencimento}
+                onChange={(e) => setNewCob({ ...newCob, data_vencimento: e.target.value })}
+                data-testid="new-cobranca-data" className="bg-[#090A0F] border-[#23283E] h-8 text-xs w-[135px]" />
+              <Button size="sm" onClick={addCobranca} data-testid="new-cobranca-add"
+                className="h-8 brand-gradient brand-gradient-hover text-white border-0 text-xs">Adicionar</Button>
             </div>
           </div>
 

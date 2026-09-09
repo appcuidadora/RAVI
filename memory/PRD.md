@@ -30,10 +30,13 @@ SOCIO_ADMIN (total), ADVOGADO_ASSOCIADO, ESTAGIARIO, SECRETARIA_ATENDIMENTO — 
 - Demo seed: cliente Carlos Eduardo, processo 1001234-56.2025.8.26.0100 (TJSP), conversa demo, alerta vermelho, KPIs 50/63/41/3/3h42
 
 ## Estado do MVP (09/09/2026)
-- 100% dos testes passando (backend 28/28: auth, CRUD, permissões, isolamento, webhook Meta, idempotência) — /app/test_reports/iteration_1..3.json
-- WhatsApp conectado com número de teste da Meta (+1 555-665-3479, phone_number_id 1266842309849495); envio outbound real confirmado (delivered=true, usuário recebeu mensagem no WhatsApp pessoal)
-- Webhook público verificado pela Meta (GET 200); aguardando usuário assinar campo "messages" no painel para inbound real
-- Regressão: `pytest /app/backend/tests/test_ravi.py tests/test_webhook_meta.py`
+- 100% dos testes passando (backend 45/45: auth, CRUD, permissões, isolamento, webhook Meta, idempotência, novas features) — /app/test_reports/iteration_1..5.json
+- WhatsApp conectado com número de teste da Meta (+1 555-665-3479, phone_number_id 1266842309849495); fluxo real confirmado pelo usuário (inbound + outbound)
+- Webhook público verificado pela Meta; app RAVI_API inscrito na WABA (subscribe_waba automático em novas conexões)
+- Feature 1: cadastro inline de cliente no processo + upload de PDF (object storage Emergent + extração pypdf) — IA lê o documento e responde com o conteúdo (validado: audiência 20/10 respondida a partir do PDF)
+- Feature 2: valor da causa + forma de pagamento + cobranças no processo; cron diário `.emergent/crons.yml` (12:00 UTC = 9h BRT) → POST /api/cron/billing-reminders (Bearer WEBHOOK_CRON_SECRET, idempotente por run_id) envia lembretes 5 dias antes (janela com retry) e no dia via WhatsApp; flag só marcada com entrega confirmada
+- Feature 3: memória de conversa com as últimas 50 mensagens no contexto da IA
+- Regressão: `pytest /app/backend/tests/`
 
 ## Pendências para produção
 - P0: credenciais da Meta App (META_APP_ID, META_APP_SECRET, META_CONFIG_ID) para ativar Embedded Signup real; App Review Meta (whatsapp_business_management/messaging); registrar webhook na Meta com a URL pública

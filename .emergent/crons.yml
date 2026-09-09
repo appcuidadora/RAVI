@@ -1,0 +1,8 @@
+crons:
+  - name: billing-reminders
+    description: "Envia lembretes de pagamento via WhatsApp 5 dias antes e no dia do vencimento"
+    cron: "0 12 * * *"
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    endpoint: "{{BASE_URL}}/api/cron/billing-reminders"
+    method: POST
+    enabled: true

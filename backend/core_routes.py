@@ -1,7 +1,8 @@
 import uuid
 import secrets
+import os
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request, BackgroundTasks, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional
 from database import db
@@ -123,12 +124,29 @@ async def delete_client(client_id: str, user: dict = Depends(require_permission(
 
 # ---------- PROCESSOS ----------
 
+class CobrancaIn(BaseModel):
+    valor: float
+    data_vencimento: str
+    descricao: Optional[str] = ""
+
+
 class ProcessIn(BaseModel):
     number: str
     client_id: Optional[str] = None
+    new_client_name: Optional[str] = None
+    new_client_phone: Optional[str] = None
     status: Optional[str] = "Em andamento"
     ultima_movimentacao: Optional[str] = ""
     notes: Optional[str] = ""
+    valor_causa: Optional[float] = None
+    forma_pagamento: Optional[str] = ""
+    cobrancas: Optional[list] = None
+
+
+def _cobranca_doc(c) -> dict:
+    return {"id": uuid.uuid4().hex, "valor": float(c["valor"]),
+            "data_vencimento": c["data_vencimento"], "descricao": c.get("descricao") or "",
+            "status": "pendente", "lembrete_5d_em": None, "lembrete_dia_em": None}
 
 
 @router.get("/processes")
@@ -145,13 +163,32 @@ async def list_processes(user: dict = Depends(require_permission("processos"))):
 async def create_process(data: ProcessIn, user: dict = Depends(require_permission("processos"))):
     parsed = parse_cnj(data.number)
     fontes = ["Informação cadastrada pelo advogado"]
+    client_id = data.client_id
+    if not client_id and data.new_client_name and data.new_client_phone:
+        norm = normalize_phone(data.new_client_phone)
+        if not norm:
+            raise HTTPException(400, "WhatsApp do novo cliente inválido")
+        existing = await db.clients.find_one({"office_id": user["office_id"], "phone_normalized": norm}, {"_id": 0})
+        if existing:
+            client_id = existing["id"]
+        else:
+            client_id = uuid.uuid4().hex
+            await db.clients.insert_one({
+                "id": client_id, "office_id": user["office_id"], "name": data.new_client_name.strip(),
+                "phone": data.new_client_phone, "phone_normalized": norm, "email": "",
+                "notes": "Criado no cadastro do processo", "status": "ativo",
+                "responsible_user_id": user["id"], "created_at": now_iso()})
+            await audit(user["office_id"], "client_created", actor=user["email"], client_id=client_id)
     proc = {
         "id": uuid.uuid4().hex, "office_id": user["office_id"],
-        "number": data.number.strip(), "client_id": data.client_id,
+        "number": data.number.strip(), "client_id": client_id,
         "status": data.status or "Em andamento",
         "ultima_movimentacao": data.ultima_movimentacao or "",
         "notes": data.notes or "", "movimentacoes": [], "partes": [],
-        "fontes": fontes, "acesso_restrito": False, "created_at": now_iso(),
+        "fontes": fontes, "acesso_restrito": False, "documentos": [],
+        "valor_causa": data.valor_causa, "forma_pagamento": data.forma_pagamento or "",
+        "cobrancas": [_cobranca_doc(c) for c in (data.cobrancas or []) if c.get("valor") and c.get("data_vencimento")],
+        "created_at": now_iso(),
     }
     if parsed:
         proc.update({k: parsed[k] for k in ("segmento", "tribunal", "unidade_origem", "ano", "numero_formatado")})
@@ -175,7 +212,195 @@ async def get_process(process_id: str, user: dict = Depends(require_permission("
         proc["client"] = await db.clients.find_one({"id": proc["client_id"]}, {"_id": 0})
     proc["conversations_count"] = await db.conversations.count_documents(
         {"office_id": user["office_id"], "process_id": process_id})
+    for d in proc.get("documentos", []):
+        d.pop("texto", None)
     return proc
+
+
+# ---------- PROCESSOS: DOCUMENTOS + FINANCEIRO ----------
+
+@router.post("/processes/{process_id}/document")
+async def upload_process_document(process_id: str, file: UploadFile = File(...),
+                                  user: dict = Depends(require_permission("processos"))):
+    proc = await db.processes.find_one({**office_filter(user), "id": process_id}, {"_id": 0})
+    if not proc:
+        raise HTTPException(404, "Processo não encontrado")
+    if not (file.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(400, "Apenas arquivos PDF")
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(400, "PDF deve ter no máximo 10MB")
+    from storage import put_object
+    result = put_object(f"ravi/processos/{user['office_id']}/{uuid.uuid4().hex}.pdf", data, "application/pdf")
+    texto = ""
+    try:
+        import io as _io
+        from pypdf import PdfReader
+        reader = PdfReader(_io.BytesIO(data))
+        texto = "\n".join((p.extract_text() or "") for p in reader.pages)[:8000]
+    except Exception:
+        texto = ""
+    doc = {"id": uuid.uuid4().hex, "filename": file.filename, "storage_path": result["path"],
+           "size": result.get("size", len(data)), "texto": texto,
+           "uploaded_by": user["email"], "created_at": now_iso()}
+    push = {"documentos": doc}
+    if "Documento fornecido pelo escritório" not in (proc.get("fontes") or []):
+        push["fontes"] = "Documento fornecido pelo escritório"
+    await db.processes.update_one({"id": process_id}, {"$push": push})
+    await audit(user["office_id"], "process_document_uploaded", actor=user["email"],
+                process_id=process_id, filename=file.filename, texto_extraido=bool(texto))
+    out = {k: v for k, v in doc.items() if k != "texto"}
+    return {"ok": True, "document": out, "texto_extraido": bool(texto)}
+
+
+@router.get("/processes/{process_id}/document/{doc_id}")
+async def download_process_document(process_id: str, doc_id: str,
+                                    user: dict = Depends(require_permission("processos"))):
+    proc = await db.processes.find_one({**office_filter(user), "id": process_id}, {"_id": 0})
+    doc = next((d for d in (proc or {}).get("documentos", []) if d["id"] == doc_id), None)
+    if not doc:
+        raise HTTPException(404, "Documento não encontrado")
+    from storage import get_object
+    from fastapi.responses import Response
+    data, _ = get_object(doc["storage_path"])
+    return Response(content=data, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{doc["filename"]}"'})
+
+
+class BillingIn(BaseModel):
+    valor_causa: Optional[float] = None
+    forma_pagamento: Optional[str] = None
+    cobrancas: Optional[list] = None
+
+
+@router.patch("/processes/{process_id}")
+async def update_process_billing(process_id: str, data: BillingIn,
+                                 user: dict = Depends(require_permission("processos"))):
+    proc = await db.processes.find_one({**office_filter(user), "id": process_id}, {"_id": 0})
+    if not proc:
+        raise HTTPException(404, "Processo não encontrado")
+    updates = {}
+    if data.valor_causa is not None:
+        updates["valor_causa"] = data.valor_causa
+    if data.forma_pagamento is not None:
+        updates["forma_pagamento"] = data.forma_pagamento
+    if data.cobrancas is not None:
+        existing = {c["id"]: c for c in proc.get("cobrancas", [])}
+        merged = []
+        for raw in data.cobrancas:
+            old = existing.get(raw.get("id", ""))
+            if old:
+                old.update({"valor": float(raw.get("valor", old["valor"])),
+                            "data_vencimento": raw.get("data_vencimento", old["data_vencimento"]),
+                            "descricao": raw.get("descricao", old.get("descricao", ""))})
+                merged.append(old)
+            elif raw.get("valor") and raw.get("data_vencimento"):
+                merged.append(_cobranca_doc(raw))
+        updates["cobrancas"] = merged
+    if updates:
+        await db.processes.update_one({"id": process_id}, {"$set": updates})
+        await audit(user["office_id"], "process_billing_updated", actor=user["email"], process_id=process_id)
+    return await db.processes.find_one({"id": process_id}, {"_id": 0, "documentos.texto": 0})
+
+
+@router.post("/processes/{process_id}/cobrancas/{cob_id}/pago")
+async def mark_cobranca_paid(process_id: str, cob_id: str,
+                             user: dict = Depends(require_permission("processos"))):
+    res = await db.processes.update_one(
+        {**office_filter(user), "id": process_id, "cobrancas.id": cob_id},
+        {"$set": {"cobrancas.$.status": "pago"}})
+    if not res.matched_count:
+        raise HTTPException(404, "Cobrança não encontrada")
+    await audit(user["office_id"], "cobranca_paid", actor=user["email"], process_id=process_id)
+    return {"ok": True}
+
+
+# ---------- CRON: LEMBRETES DE COBRANÇA ----------
+
+@router.post("/cron/billing-reminders")
+async def cron_billing_reminders(request: Request, background_tasks: BackgroundTasks):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    import hmac as _hmac
+    secret = os.environ.get("WEBHOOK_CRON_SECRET", "")
+    auth = request.headers.get("Authorization", "")
+    token = auth[7:] if auth.startswith("Bearer ") else ""
+    if not secret or not _hmac.compare_digest(token, secret):
+        raise HTTPException(401, "Não autorizado")
+    try:
+        envelope = await request.json()
+    except Exception:
+        raise HTTPException(400, "Envelope inválido")
+    run_id = envelope.get("run_id") or request.headers.get("X-Webhook-Id") or uuid.uuid4().hex
+    if await db.cron_runs.find_one({"run_id": run_id}):
+        return {"ok": True, "duplicate": True}
+    await db.cron_runs.insert_one({"run_id": run_id, "job": "billing-reminders", "created_at": now_iso()})
+    background_tasks.add_task(send_billing_reminders)
+    return {"ok": True}
+
+
+async def send_billing_reminders():
+    from zoneinfo import ZoneInfo
+    from datetime import date as _date
+    today = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    async for proc in db.processes.find({"cobrancas": {"$elemMatch": {"status": "pendente"}}}):
+        client = None
+        if proc.get("client_id"):
+            client = await db.clients.find_one({"id": proc["client_id"]}, {"_id": 0})
+        if not client:
+            continue
+        connection = await db.whatsapp_connections.find_one(
+            {"office_id": proc["office_id"], "status": "connected"}, {"_id": 0})
+        for cob in proc.get("cobrancas", []):
+            if cob.get("status") != "pendente":
+                continue
+            try:
+                venc = _date.fromisoformat(cob["data_vencimento"])
+            except Exception:
+                continue
+            dias = (venc - today).days
+            flag, prazo = None, None
+            if 0 < dias <= 5 and not cob.get("lembrete_5d_em"):
+                flag, prazo = "lembrete_5d_em", f"vence em {dias} dias ({venc.strftime('%d/%m/%Y')})"
+            elif dias == 0 and not cob.get("lembrete_dia_em"):
+                flag, prazo = "lembrete_dia_em", "vence hoje"
+            if not flag:
+                continue
+            first = client["name"].split()[0]
+            valor = f"R$ {cob['valor']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            desc = f" ({cob['descricao']})" if cob.get("descricao") else ""
+            text = (f"Olá, {first}! Passando para lembrar que a parcela de {valor}{desc} "
+                    f"referente ao seu processo {prazo}. ")
+            if proc.get("forma_pagamento"):
+                text += f"Forma de pagamento combinada: {proc['forma_pagamento']}. "
+            text += "Qualquer dúvida, é só responder por aqui."
+            conv = await db.conversations.find_one(
+                {"office_id": proc["office_id"], "phone_normalized": client["phone_normalized"],
+                 "status": {"$ne": "archived"}}, {"_id": 0})
+            if not conv:
+                conv = {"id": uuid.uuid4().hex, "office_id": proc["office_id"],
+                        "phone_normalized": client["phone_normalized"], "client_id": client["id"],
+                        "process_id": proc["id"], "status": "active", "risk_level": "green",
+                        "ai_enabled": True, "human_control": False, "assigned_user_id": None,
+                        "created_at": now_iso(), "last_message_at": now_iso()}
+                await db.conversations.insert_one(conv)
+            delivered = False
+            if connection and connection.get("access_token"):
+                try:
+                    await graph_send_text(connection, client["phone_normalized"], text)
+                    delivered = True
+                except Exception:
+                    delivered = False
+            if not delivered and connection:
+                # Falha de entrega com conexão ativa (ex: token expirado): não marca flag — o cron tenta de novo amanhã
+                await audit(proc["office_id"], "billing_reminder_failed", client_id=client["id"],
+                            process_id=proc["id"], cobranca_id=cob["id"], tipo=flag)
+                continue
+            await save_message(proc["office_id"], conv["id"], "ravi", text,
+                               risk_level="green", delivered=delivered)
+            await db.processes.update_one({"id": proc["id"], "cobrancas.id": cob["id"]},
+                                          {"$set": {f"cobrancas.$.{flag}": now_iso()}})
+            await audit(proc["office_id"], "billing_reminder_sent", client_id=client["id"],
+                        process_id=proc["id"], cobranca_id=cob["id"], tipo=flag, delivered=delivered)
 
 
 # ---------- CONVERSAS ----------
