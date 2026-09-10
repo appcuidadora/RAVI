@@ -97,6 +97,9 @@ class TestAudioWebhook:
         assert count_after == count_before, f"tipo {mtype} não deveria criar msg"
 
     def test_text_regression_creates_text_message_and_ravi_reply(self, admin_session):
+        st = admin_session.get(f"{API}/whatsapp/status").json()
+        if not st.get("connection") or st["connection"]["status"] not in ("connected", "token_expired"):
+            pytest.skip("Conexão WhatsApp de teste inativa — aguardando novo token Meta")
         conv_id_before, count_before = _snapshot_msgs(admin_session)
         marker = f"regressao-texto-{uuid.uuid4().hex[:6]}"
         msg_id = f"wamid.text-{uuid.uuid4().hex}"

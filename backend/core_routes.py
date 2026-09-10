@@ -179,6 +179,17 @@ async def create_process(data: ProcessIn, user: dict = Depends(require_permissio
                 "notes": "Criado no cadastro do processo", "status": "ativo",
                 "responsible_user_id": user["id"], "created_at": now_iso()})
             await audit(user["office_id"], "client_created", actor=user["email"], client_id=client_id)
+    limite_alerta = False
+    office = await db.offices.find_one({"id": user["office_id"]}, {"_id": 0, "plan_id": 1})
+    if office and office.get("plan_id"):
+        plan = await db.plans.find_one({"id": office["plan_id"]}, {"_id": 0})
+        if plan and plan.get("process_limit"):
+            count = await db.processes.count_documents({"office_id": user["office_id"]})
+            limit = plan["process_limit"]
+            hard_limit = int(limit * (1 + (plan.get("overage_pct", 10)) / 100))
+            if count >= hard_limit:
+                raise HTTPException(402, f"Limite do plano excedido ({count}/{limit} processos). Fale com o suporte RAVI para ampliar seu plano.")
+            limite_alerta = count >= limit
     proc = {
         "id": uuid.uuid4().hex, "office_id": user["office_id"],
         "number": data.number.strip(), "client_id": client_id,
@@ -200,6 +211,7 @@ async def create_process(data: ProcessIn, user: dict = Depends(require_permissio
     await db.processes.insert_one(proc)
     await audit(user["office_id"], "process_created", actor=user["email"], process_id=proc["id"])
     proc.pop("_id", None)
+    proc["limite_alerta"] = limite_alerta
     return proc
 
 
@@ -653,6 +665,48 @@ async def update_settings(data: OfficeSettingsIn, user: dict = Depends(require_s
     if updates:
         await db.offices.update_one({"id": user["office_id"]}, {"$set": updates})
     return await db.offices.find_one({"id": user["office_id"]}, {"_id": 0, "demo_metrics": 0})
+
+
+# ---------- SUPORTE (lado do escritório) ----------
+
+class TicketIn(BaseModel):
+    categoria: str
+    assunto: str
+    descricao: str
+    prioridade: Optional[str] = "media"
+
+
+@router.post("/support/tickets")
+async def create_ticket(data: TicketIn, user: dict = Depends(get_current_user)):
+    if not data.assunto.strip() or not data.descricao.strip():
+        raise HTTPException(400, "Informe assunto e descrição")
+    ticket = {"id": uuid.uuid4().hex, "office_id": user["office_id"],
+              "user_email": user["email"], "user_name": user.get("name", ""),
+              "categoria": data.categoria, "assunto": data.assunto.strip(),
+              "descricao": data.descricao.strip(), "prioridade": data.prioridade,
+              "status": "aberto", "responsavel": None, "created_at": now_iso()}
+    await db.tickets.insert_one(ticket)
+    await audit(user["office_id"], "ticket_created", actor=user["email"], assunto=ticket["assunto"])
+    ticket.pop("_id", None)
+    return ticket
+
+
+@router.get("/support/tickets")
+async def list_my_tickets(user: dict = Depends(get_current_user)):
+    return await db.tickets.find(office_filter(user), {"_id": 0}).sort("created_at", -1).to_list(100)
+
+
+# ---------- IMPERSONATION (encerrar sessão de suporte) ----------
+
+class ImpEndIn(BaseModel):
+    log_id: str
+
+
+@router.post("/impersonation/end")
+async def impersonation_end(data: ImpEndIn, user: dict = Depends(get_current_user)):
+    await db.admin_logs.update_one({"id": data.log_id, "action": "impersonation_start"},
+                                   {"$set": {"ended_at": now_iso()}})
+    return {"ok": True}
 
 
 # ---------- AUDITORIA ----------

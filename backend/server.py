@@ -5,11 +5,12 @@ import os
 import logging
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
-from database import client
+from database import client, db
 from auth_routes import router as auth_router
 from core_routes import router as core_router
 from whatsapp_routes import router as whatsapp_router
-from seed import create_indexes, seed_demo
+from seed import create_indexes, seed_demo, seed_platform
+from admin_routes import router as admin_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ app = FastAPI(title="RAVI API")
 app.include_router(auth_router)
 app.include_router(core_router)
 app.include_router(whatsapp_router)
+app.include_router(admin_router)
 
 frontend_url = os.environ.get("FRONTEND_URL", "")
 origins = [frontend_url] if frontend_url else os.environ.get("CORS_ORIGINS", "*").split(",")
@@ -33,7 +35,12 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
+    doc = await db.platform_settings.find_one({"id": "global"})
+    for k, v in (((doc or {}).get("secrets")) or {}).items():
+        if isinstance(v, str) and v and not os.environ.get(k):
+            os.environ[k] = v
     await create_indexes()
+    await seed_platform()
     await seed_demo()
     logger.info("RAVI API pronta")
 

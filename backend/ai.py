@@ -1,8 +1,24 @@
 import os
 import logging
 from datetime import datetime, timezone
+from database import db
 
 logger = logging.getLogger(__name__)
+
+_ai_cfg_cache = {"at": 0.0, "data": None}
+
+
+async def _ai_global_config() -> dict:
+    """Configuração global de IA (RAVI ADMIN). Cache de 60s. Regras globais são inegociáveis."""
+    import time
+    t = time.time()
+    if _ai_cfg_cache["data"] is not None and t - _ai_cfg_cache["at"] < 60:
+        return _ai_cfg_cache["data"]
+    doc = await db.platform_settings.find_one({"id": "global"}, {"_id": 0, "ai_config": 1})
+    cfg = (doc or {}).get("ai_config") or {}
+    _ai_cfg_cache["at"] = t
+    _ai_cfg_cache["data"] = cfg
+    return cfg
 
 RED_SIGNALS = [
     "estrateg", "recurs", "recorrer", "acordo", "negoci", "acelerar", "vale a pena",
@@ -125,6 +141,14 @@ async def generate_ravi_reply(office: dict, client: dict, process: dict, history
         f"CONTEXTO DO PROCESSO:\n{_process_context(process)}\n{docs_txt}\n"
         f"HISTÓRICO DA CONVERSA (do mais antigo ao mais recente):\n{hist_txt}"
     )
+    cfg = await _ai_global_config()
+    rules = cfg.get("rules") or []
+    if rules:
+        system += "\n\nREGRAS GLOBAIS DO RAVI (inegociáveis, nunca podem ser violadas):\n" + \
+            "\n".join(f"- {r}" for r in rules)
+    if cfg.get("autonomia") == "restrito":
+        system += ("\nMODO RESTRITO: responda apenas perguntas objetivas sobre andamento/status; "
+                   "todo o restante deve ser encaminhado ao advogado responsável.")
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage
         chat = LlmChat(

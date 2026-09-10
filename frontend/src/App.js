@@ -18,6 +18,17 @@ import Alertas from "@/pages/Alertas";
 import Equipe from "@/pages/Equipe";
 import Configuracoes from "@/pages/Configuracoes";
 import WhatsAppPage from "@/pages/WhatsAppPage";
+import AdminLogin from "@/pages/admin/AdminLogin";
+import AdminLayout from "@/pages/admin/AdminLayout";
+import AdminDashboard from "@/pages/admin/AdminDashboard";
+import AdminEscritorios from "@/pages/admin/AdminEscritorios";
+import AdminPlanos from "@/pages/admin/AdminPlanos";
+import AdminFinanceiro from "@/pages/admin/AdminFinanceiro";
+import AdminWhatsApp from "@/pages/admin/AdminWhatsApp";
+import AdminSuporte from "@/pages/admin/AdminSuporte";
+import AdminRelatorios from "@/pages/admin/AdminRelatorios";
+import AdminLogs from "@/pages/admin/AdminLogs";
+import AdminConfiguracoes from "@/pages/admin/AdminConfiguracoes";
 
 function FullScreenLoader() {
   return (
@@ -63,6 +74,18 @@ function AppRoutes() {
         <Route path="/equipe" element={<RequirePerm module="equipe"><Equipe /></RequirePerm>} />
         <Route path="/configuracoes" element={<RequirePerm module="configuracoes"><Configuracoes /></RequirePerm>} />
         <Route path="/whatsapp" element={<RequirePerm module="whatsapp"><WhatsAppPage /></RequirePerm>} />
+      </Route>
+      <Route path="/admin/login" element={<AdminLogin />} />
+      <Route path="/admin" element={<AdminLayout />}>
+        <Route index element={<AdminDashboard />} />
+        <Route path="escritorios" element={<AdminEscritorios />} />
+        <Route path="planos" element={<AdminPlanos />} />
+        <Route path="financeiro" element={<AdminFinanceiro />} />
+        <Route path="whatsapp" element={<AdminWhatsApp />} />
+        <Route path="suporte" element={<AdminSuporte />} />
+        <Route path="relatorios" element={<AdminRelatorios />} />
+        <Route path="logs" element={<AdminLogs />} />
+        <Route path="configuracoes" element={<AdminConfiguracoes />} />
       </Route>
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

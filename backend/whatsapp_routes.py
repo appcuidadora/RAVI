@@ -199,6 +199,10 @@ async def whatsapp_connect_test(data: ConnectTestIn, user: dict = Depends(requir
     if not phone_id or not waba_id:
         raise HTTPException(503, "Número de teste não configurado no servidor")
     if not data.access_token.strip():
+        doc = await db.platform_settings.find_one({"id": "global"}, {"_id": 0})
+        platform_token = ((doc or {}).get("secrets") or {}).get("META_TEST_TOKEN", "")
+        data.access_token = platform_token
+    if not data.access_token.strip():
         raise HTTPException(400, "Informe o token de acesso temporário")
     display = await fetch_phone_display(phone_id, data.access_token.strip())
     if not display:
@@ -255,7 +259,7 @@ async def webhook_receive(request: Request, background_tasks: BackgroundTasks):
                 continue
             # phone_number_id identifica o escritório; desconhecido → não associa a nenhum tenant
             connection = await db.whatsapp_connections.find_one(
-                {"phone_number_id": phone_number_id, "status": "connected"}, {"_id": 0})
+                {"phone_number_id": phone_number_id, "status": {"$in": ["connected", "token_expired"]}}, {"_id": 0})
             if not connection:
                 logger.warning(f"Webhook: phone_number_id desconhecido {phone_number_id}")
                 continue

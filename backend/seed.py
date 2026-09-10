@@ -33,6 +33,40 @@ async def create_indexes():
     await db.password_reset_requests.create_index("created_at", expireAfterSeconds=900)
 
 
+async def seed_platform():
+    """SUPER_ADMIN + planos padrão + campos comerciais dos escritórios."""
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@ravi.app").lower()
+    if not await db.admin_users.find_one({"email": admin_email}):
+        await db.admin_users.insert_one({
+            "id": uuid.uuid4().hex, "name": "RAVI Admin", "email": admin_email,
+            "password_hash": hash_password(os.environ.get("ADMIN_PASSWORD", "Ravi@2026")),
+            "role": "SUPER_ADMIN", "active": True, "totp_secret": None, "created_at": now_iso(),
+        })
+        logger.info("SUPER_ADMIN criado")
+    default_plans = [
+        {"name": "STARTER", "process_limit": 25, "user_limit": 3, "message_limit": 2000, "ai_quota": 2000},
+        {"name": "PROFESSIONAL", "process_limit": 100, "user_limit": 10, "message_limit": 10000, "ai_quota": 10000},
+        {"name": "OFFICE", "process_limit": 500, "user_limit": 30, "message_limit": 50000, "ai_quota": 50000},
+        {"name": "ENTERPRISE", "process_limit": None, "user_limit": None, "message_limit": None, "ai_quota": None},
+    ]
+    for p in default_plans:
+        if not await db.plans.find_one({"name": p["name"]}):
+            await db.plans.insert_one({"id": uuid.uuid4().hex, **p, "features": "",
+                                       "price_monthly": 0, "price_yearly": 0, "overage_pct": 10,
+                                       "status": "ativo", "created_at": now_iso()})
+    starter = await db.plans.find_one({"name": "STARTER"}, {"_id": 0})
+    await db.offices.update_many(
+        {"status": {"$exists": False}},
+        {"$set": {"status": "active", "plan_id": starter["id"] if starter else None,
+                  "valor_mensal": 0, "ciclo": "mensal", "observacoes": ""}})
+    await db.offices.update_many(
+        {"plan_id": {"$exists": False}},
+        {"$set": {"plan_id": starter["id"] if starter else None}})
+    office_plan = await db.plans.find_one({"name": "OFFICE"}, {"_id": 0})
+    if office_plan:
+        await db.offices.update_one({"name": "Silva Advocacia"}, {"$set": {"plan_id": office_plan["id"]}})
+
+
 async def seed_demo():
     """Dados demo: Dr. Carlos Mendes / Silva Advocacia / Carlos Eduardo / processo 1001234-56.2025.8.26.0100."""
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@ravi.app").lower()

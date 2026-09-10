@@ -29,8 +29,20 @@ SOCIO_ADMIN (total), ADVOGADO_ASSOCIADO, ESTAGIARIO, SECRETARIA_ATENDIMENTO — 
 - Admin: construcaovilanova@gmail.com / Ravi@2026 (Dr. Carlos Mendes, Silva Advocacia)
 - Demo seed: cliente Carlos Eduardo, processo 1001234-56.2025.8.26.0100 (TJSP), conversa demo, alerta vermelho, KPIs 50/63/41/3/3h42
 
+## RAVI ADMIN (entrega 10/09/2026)
+- Dois ambientes: RAVI APP (escritórios) × RAVI ADMIN (/admin, SUPER_ADMIN seed, cookie próprio admin_access_token, roles futuras preparadas)
+- Dashboard admin: 20 KPIs reais + bloco ⚠️ Atenção (tokens expirados, cobranças vencidas, uso de limite, suspensos)
+- Escritórios: listagem enriquecida, edição (status/plano/valores/vencimento/obs), suspensão bloqueia API do tenant (403) sem apagar dados, histórico upgrade/downgrade, churn em cancelamento, **impersonation auditada** (motivo obrigatório, banner âmbar no app, fim registrado)
+- Planos: STARTER(25)/PROFESSIONAL(100)/OFFICE(500)/ENTERPRISE configuráveis, overage_pct (padrão 10%) — limite gera alerta; hard limit bloqueia com 402 amigável
+- Mini-financeiro: cobranças/recebimentos, aging de inadimplência, MRR/ARR/ticket, descontos; camada de abstração para gateway futuro (Stripe/MP/Asaas)
+- Meta admin: secrets write-only (platform_settings + env), ambiente, conexões por escritório, health check de 9 componentes
+- Logs: admin_logs + audit_logs unificados com filtros; Suporte: chamados do escritório → gestão no admin
+- Config global de IA: regras inegociáveis no system prompt (hierarquia global > escritório > usuário > conversa), modo restrito
+- Relatórios: 6 blocos consolidados (/admin/relatorios)
+
 ## Estado do MVP (09/09/2026)
-- 100% dos testes passando (backend 45/45: auth, CRUD, permissões, isolamento, webhook Meta, idempotência, novas features) — /app/test_reports/iteration_1..5.json
+- Suíte completa: 78 passed / 0 falhas (7 skips ambientais de token Meta 24h) — /app/test_reports/iteration_8.json
+- Pós-review it8: crash de startup corrigido (secrets_meta sibling field + isinstance guard), webhook processa inbound mesmo com token_expired, pay_charge guarda valor_recebido separado, Silva Advocacia no plano OFFICE, testes dependentes de token viram skip ambiental
 - WhatsApp conectado com número de teste da Meta (+1 555-665-3479, phone_number_id 1266842309849495); fluxo real confirmado pelo usuário (inbound + outbound)
 - Webhook público verificado pela Meta; app RAVI_API inscrito na WABA (subscribe_waba automático em novas conexões)
 - Feature 1: cadastro inline de cliente no processo + upload de PDF (object storage Emergent + extração pypdf) — IA lê o documento e responde com o conteúdo (validado: audiência 20/10 respondida a partir do PDF)

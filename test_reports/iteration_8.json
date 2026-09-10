@@ -1,0 +1,56 @@
+{
+  "summary": "Iteration 8 — RAVI ADMIN × RAVI APP separation. Created /app/backend/tests/test_admin_platform.py (20 tests: admin auth isolation, dashboard KPIs, offices CRUD + suspension blocks tenant + reactivation, plan change direction, impersonation with motivo + bearer-first + end log, plans CRUD + 4 seed plans, billing lifecycle + overview + aging, Meta secrets write-only (no leak in any response), 9-check health, tickets flow, AI global rules persist, overage limite_alerta + 402 hard block). 20/20 PASS. Frontend: /admin without auth redirects to /admin/login; wrong pw shows error; correct login reaches /admin dashboard with 20 KPIs + Atenção block listing Silva at 268% (STARTER 25 limit). All 9 admin routes (/admin, /escritorios, /planos, /financeiro, /whatsapp, /suporte, /relatorios, /logs, /configuracoes) render — only routine 401 pre-login probe (expected). Refresh on /admin/escritorios preserves route. CRITICAL BUG FOUND & FIXED: backend startup crashed with TypeError after first POST /admin/meta/secrets because platform_settings.secrets._meta (dict) got iterated as os.environ[k]=v — patched server.py to skip non-string values.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "startup / /admin/meta/secrets", "issue": "server.py startup crashed (TypeError: str expected, not dict) because it iterated ALL keys of platform_settings.secrets (including sub-dict _meta added by /admin/meta/secrets) into os.environ. After ANY secrets update, the next backend restart would fail lifespan and take the whole API down. Fixed by adding isinstance(v, str) guard.", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "/api/admin/health", "issue": "checks.token = false because Silva Advocacia WhatsApp connection is now status=token_expired (Meta test token likely rotated/expired since ~13:20 UTC seed). Environmental — main agent may need to refresh the Meta test token or reconnect."},
+      {"endpoint": "regression tests using Silva Advocacia", "issue": "13 legacy tests in test_ravi.py / test_new_features.py fail with HTTP 402 'Limite do plano excedido (67/25)'. Root cause is the NEW overage feature enforcing STARTER plan hard-limit (27) on Silva which has 67 procs seeded. Feature works as designed; legacy tests need to be migrated to a fresh TEST_ office OR Silva should be upgraded in seed to PROFESSIONAL/OFFICE (but that would break the intentional 'attention' demo). Recommendation: migrate the affected tests."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AdminConfiguracoes", "issue": "React warning 'A component is changing a controlled input to be uncontrolled' + 'Select is changing from controlled to uncontrolled' — Select defaultValue/value mismatch on initial render. Non-blocking but noisy in console.", "selector": "/admin/configuracoes Select components", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_platform.py",
+    "/app/test_reports/pytest/iter8_admin.xml",
+    "/app/test_reports/pytest/iter8_full.xml"
+  ],
+  "action_items": [
+    "Confirm the server.py isinstance-guard fix (applied by testing agent). Long-term: store secret metadata in a separate top-level field (platform_settings.secrets_meta) instead of nesting under secrets, so the invariant 'secrets values are strings' is enforced at data-model level.",
+    "Refresh/reconnect the Meta test token — /admin/health checks.token is currently false because Silva's whatsapp_connection.status = token_expired. Health check on 'token' depends on a live connection.",
+    "Migrate the 11 legacy tests (test_ravi.py TestProcesses / test_new_features.py TestInlineClient/TestDocuments/TestCobrancas/TestCronDispatch) off Silva Advocacia to a freshly-created office; alternatively they should not rely on process creation on the demo tenant now that overage enforcement is live.",
+    "AdminConfiguracoes.jsx: give Select components an initial value (empty string or the loaded default) so React does not report controlled↔uncontrolled transition on first render.",
+    "test_audio_webhook.py::TestAiModuleIntegrity::test_classify_and_transcribe_importable fails to import ai.py because database.py raises KeyError on MONGO_URL when imported without env. Pre-existing but should load conftest env fixture or use os.environ.get."
+  ],
+  "critical_code_review_comments": [
+    "admin_routes.get_current_admin correctly enforces type=='admin' — good isolation between admin/app JWTs (verified by cross-cookie tests).",
+    "admin_routes.impersonate mints an app access_token with type='access' — combined with security.get_current_user bearer-first ordering (auth[7:] before cookies) this gives clean impersonation without shared password. Test confirmed Bearer takes priority over cookie.",
+    "security.get_current_user checks office status in ('suspended','canceled') → 403. This blocks /auth/me and every other tenant endpoint. Verified suspend/reactivate cycle works.",
+    "admin_routes.update_secrets: values are correctly never returned in any endpoint (test_write_only confirms fake_xxxxxx string NEVER appears in /admin/meta/status body). However the current data shape (secrets._meta as sub-dict) is what triggered the startup crash — see critical issue above. Recommend flattening.",
+    "core_routes.create_process overage: count uses count_documents({'office_id': ...}) before insert; there's a small TOCTOU window under concurrency (two parallel POSTs could both pass the hard-limit check and each insert one). Not exploitable in normal use but acknowledge for future.",
+    "admin_routes.pay_charge OVERWRITES valor_final with paid amount — this is intentional for partial-payment recording but note that if valor_final was set at creation (data.valor - desconto), it's now lost. Report the received amount in receipts, keep valor_final untouched for accounting integrity — consider storing valor_recebido separately.",
+    "admin_routes.list_offices does N+1 queries per office (users count, procs count, socio find, whatsapp find, last_msg find). With 25+ offices this is 100+ DB calls per page load. Acceptable now but plan aggregation pipeline for scale.",
+    "admin_routes.admin_dashboard also does per-office queries in loops for atencao — same N+1 pattern. Consider a single $lookup aggregation.",
+    "admin_routes.py is 648 lines — still under the 700 threshold but growing. Split into admin_auth.py / admin_offices.py / admin_billing.py / admin_meta.py before it grows."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin_platform.py",
+    "/app/backend/server.py"
+  ],
+  "success_rate": {
+    "backend": "20/20 (100%) on new admin platform tests. Full suite: 68 passed, 13 failed, 2 skipped, 2 errors — 13 failures are pre-existing legacy tests broken by the new (correct) overage enforcement on Silva Advocacia demo tenant.",
+    "frontend": "9/9 admin routes render, dashboard + Atenção block correct, refresh preserves route, unauth redirects. 1 minor React warning on /admin/configuracoes."
+  },
+  "test_credentials": "SUPER_ADMIN: construcaovilanova@gmail.com / Ravi@2026",
+  "seed_data_creation": "Each test run creates a fresh TEST_Office_* with a new TEST_socio_*@example.com user + STARTER plan for destructive tests (suspension, plan change, overage). Not cleaned up automatically — TEST_ prefix used for easy filtering.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The 13 regression failures ARE NOT actual bugs — they are legacy tests colliding with the new overage limit on Silva Advocacia (67/25 procs). Once main agent decides how to handle (upgrade Silva plan in seed OR migrate legacy tests to TEST_ offices), rerun full suite. Also, refresh Meta test token if health.token stays false. Admin platform separation, cross-cookie isolation, impersonation bearer-first, tenant suspension 403, secrets write-only, overage 402 hard block, plan change direction detection, financial CRUD + aging, tickets flow, AI rules persistence — ALL verified green.",
+  "rca of the issue": "STARTUP CRASH RCA — POST /admin/meta/secrets writes both raw values (secrets.META_TEST_TOKEN='fake…') AND metadata under secrets._meta (as a nested dict with keys like META_TEST_TOKEN_at, META_TEST_TOKEN_status). On next backend startup, server.py iterated `for k, v in (doc.get('secrets') or {}).items()` and hit `os.environ[k] = v` where v = {'META_TEST_TOKEN_at': '...', 'META_TEST_TOKEN_status': 'invalid'} — dict is not str → TypeError → Lifespan failed → 'Application startup failed. Exiting.' → uvicorn crash → every subsequent request times out. Reproduction: (1) POST /admin/meta/secrets with meta_test_token=anything, (2) supervisorctl restart backend, (3) any API call → gateway timeout. MITIGATION APPLIED: added `isinstance(v, str)` guard in server.py startup loop. LONG-TERM: refactor admin_routes.update_secrets to store metadata under a sibling field (platform_settings.secrets_meta) rather than nested under platform_settings.secrets."
+}

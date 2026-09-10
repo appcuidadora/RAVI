@@ -90,11 +90,10 @@ def public_user(user: dict) -> dict:
 
 
 async def get_current_user(request: Request) -> dict:
-    token = request.cookies.get("access_token")
+    auth = request.headers.get("Authorization", "")
+    token = auth[7:] if auth.startswith("Bearer ") else None
     if not token:
-        auth = request.headers.get("Authorization", "")
-        if auth.startswith("Bearer "):
-            token = auth[7:]
+        token = request.cookies.get("access_token")
     if not token:
         raise HTTPException(401, "Não autenticado")
     try:
@@ -112,6 +111,10 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(401, "Sessão expirada")
     if not user.get("active", True):
         raise HTTPException(403, "Usuário desativado")
+    if user.get("office_id"):
+        office = await db.offices.find_one({"id": user["office_id"]}, {"_id": 0, "status": 1})
+        if office and office.get("status") in ("suspended", "canceled"):
+            raise HTTPException(403, "Escritório suspenso. Fale com o suporte RAVI.")
     return user
 
 

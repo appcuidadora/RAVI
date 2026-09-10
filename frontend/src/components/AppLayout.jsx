@@ -54,6 +54,20 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const [waStatus, setWaStatus] = useState(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [imp, setImp] = useState(null);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("ravi_impersonate");
+      if (raw) setImp(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  const endImpersonation = async () => {
+    try { if (imp?.log_id) await api.post("/impersonation/end", { log_id: imp.log_id }); } catch {}
+    sessionStorage.removeItem("ravi_impersonate");
+    window.location.href = "/admin/escritorios";
+  };
 
   useEffect(() => {
     api.get("/whatsapp/status").then((r) => setWaStatus(r.data)).catch(() => {});
@@ -91,6 +105,17 @@ export default function AppLayout() {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
+        {imp && (
+          <div className="bg-amber-500/15 border-b border-amber-600/40 px-4 py-2 flex items-center justify-between" data-testid="impersonation-banner">
+            <p className="text-xs text-amber-300">
+              Modo de suporte administrativo — visualizando como <strong>{imp.office_name}</strong>
+            </p>
+            <button onClick={endImpersonation} data-testid="end-impersonation-btn"
+              className="text-xs text-amber-200 hover:text-white underline underline-offset-2">
+              Encerrar sessão de suporte
+            </button>
+          </div>
+        )}
         <header className="h-14 border-b border-[#23283E] bg-[#0B0D14]/80 backdrop-blur-md px-4 lg:px-6 flex items-center justify-between sticky top-0 z-40">
           <div className="flex items-center gap-3">
             <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>

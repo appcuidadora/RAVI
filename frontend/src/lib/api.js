@@ -5,6 +5,14 @@ export const api = axios.create({
   withCredentials: true,
 });
 
+api.interceptors.request.use((config) => {
+  try {
+    const imp = sessionStorage.getItem("ravi_impersonate");
+    if (imp) config.headers.Authorization = `Bearer ${JSON.parse(imp).token}`;
+  } catch {}
+  return config;
+});
+
 api.interceptors.response.use(
   (r) => r,
   async (err) => {
