@@ -9,6 +9,7 @@ from database import client, db
 from auth_routes import router as auth_router
 from core_routes import router as core_router
 from whatsapp_routes import router as whatsapp_router
+from usage_routes import router as usage_router
 from seed import create_indexes, seed_demo, seed_platform
 from admin_routes import router as admin_router
 
@@ -20,6 +21,7 @@ app = FastAPI(title="RAVI API")
 app.include_router(auth_router)
 app.include_router(core_router)
 app.include_router(whatsapp_router)
+app.include_router(usage_router)
 app.include_router(admin_router)
 
 frontend_url = os.environ.get("FRONTEND_URL", "")

@@ -532,6 +532,10 @@ async def send_billing_reminders():
                 continue
             await save_message(proc["office_id"], conv["id"], "ravi", text,
                                risk_level="green", delivered=delivered)
+            from usage import record_usage_event
+            await record_usage_event(proc["office_id"], "outbound", "UTILITY", True,
+                                     connection_id=(connection or {}).get("id"),
+                                     conversation_id=conv["id"])
             await db.processes.update_one({"id": proc["id"], "cobrancas.id": cob["id"]},
                                           {"$set": {f"cobrancas.$.{flag}": now_iso()}})
             await audit(proc["office_id"], "billing_reminder_sent", client_id=client["id"],
@@ -599,6 +603,9 @@ async def send_human_message(conv_id: str, data: TextIn, user: dict = Depends(re
             delivered = False
     msg = await save_message(user["office_id"], conv_id, "user", data.text,
                              sender_user_id=user["id"], delivered=delivered)
+    from usage import record_usage_event
+    await record_usage_event(user["office_id"], "outbound", "SERVICE", False,
+                             connection_id=(connection or {}).get("id"), conversation_id=conv_id)
     msg.pop("_id", None)
     await audit(user["office_id"], "human_reply", actor=user["email"],
                 conversation_id=conv_id, delivered=delivered)

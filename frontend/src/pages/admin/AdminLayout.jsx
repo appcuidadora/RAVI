@@ -16,6 +16,7 @@ const NAV = [
   { label: "Planos", icon: Layers, path: "/admin/planos", tid: "admin-nav-planos" },
   { label: "Financeiro", icon: Banknote, path: "/admin/financeiro", tid: "admin-nav-financeiro" },
   { label: "WhatsApp / Meta", icon: PhoneCall, path: "/admin/whatsapp", tid: "admin-nav-whatsapp" },
+  { label: "Tarifas WhatsApp", icon: Banknote, path: "/admin/whatsapp/pricing", tid: "admin-nav-pricing" },
   { label: "Suporte", icon: LifeBuoy, path: "/admin/suporte", tid: "admin-nav-suporte" },
   { label: "Relatórios", icon: BarChart3, path: "/admin/relatorios", tid: "admin-nav-relatorios" },
   { label: "Logs", icon: ScrollText, path: "/admin/logs", tid: "admin-nav-logs" },

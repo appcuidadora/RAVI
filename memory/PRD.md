@@ -29,6 +29,17 @@ SOCIO_ADMIN (total), ADVOGADO_ASSOCIADO, ESTAGIARIO, SECRETARIA_ATENDIMENTO — 
 - Admin: construcaovilanova@gmail.com / Ravi@2026 (Dr. Carlos Mendes, Silva Advocacia)
 - Demo seed: cliente Carlos Eduardo, processo 1001234-56.2025.8.26.0100 (TJSP), conversa demo, alerta vermelho, KPIs 50/63/41/3/3h42
 
+## FASE 6 — Planos, Consumo WhatsApp e Financeiro (10/09/2026) — VALIDADA
+- Validação formal (iteration_14): test_phase6_billing.py com 19 testes, 19/19 verdes; regressão global 162 passed / 6 skipped (token Meta 24h) / 0 failed; frontend confirmado via Playwright (/admin/whatsapp/pricing, /admin/relatorios consolidado, /whatsapp painel consumo)
+- PlanVersion: versionamento automático a cada alteração comercial (versão anterior encerrada, nunca sobrescrita); GET /admin/plans/{id}/versions
+- Subscription: mudança de plano registra assinatura com plan_version_id, opção "immediate" ou "next_cycle" (agendada via pending_plan_id)
+- WhatsAppUsageEvent: cada mensagem registrada individualmente com categoria Meta (SERVICE/UTILITY/MARKETING/AUTH*), billable, meta_cost e ravi_price CONGELADOS no evento (histórico imutável); hooks no pipeline (inbound, respostas, lembretes UTILITY faturáveis)
+- WhatsAppPricing (custo Meta versionado) + WhatsAppCustomerRate (preço RAVI por plano) — CRUD admin em /admin/whatsapp/pricing, nada fixo em código
+- Faturas WhatsApp separadas da assinatura (invoice_number RAVI-WA-*, itens por categoria, pay com payments); ajustes manuais (crédito/desconto/estorno) com motivo obrigatório
+- BillingPeriod materializado no faturamento; painel do escritório GET /api/whatsapp/usage (faturáveis, acumulado, faturado, a pagar, histórico diário) na tela /whatsapp
+- Consolidado admin /admin/reports/whatsapp (receita, custo Meta, margem, por escritório/categoria/período) em /admin/relatorios
+- Alertas de consumo por % do limite do plano (configurável, default 70/80/90, nunca bloqueia)
+
 ## FASE 5 — RAVI ADMIN fechamento (10/09/2026)
 - /admin/usuarios: CRUD de administradores (roles SUPER_ADMIN/ADMIN_FINANCEIRO/SUPORTE/OPERACOES/COMERCIAL/TECNOLOGIA/ANALISTA), senha temporária, desativar/reativar, apenas SUPER_ADMIN gerencia
 - Logs com filtro por período (from_date/to_date) além de tipo/escritório
@@ -83,6 +94,13 @@ SOCIO_ADMIN (total), ADVOGADO_ASSOCIADO, ESTAGIARIO, SECRETARIA_ATENDIMENTO — 
 - P2: integrações de tribunais (fontes públicas/autenticadas), importação de PDF de processos, RAVI Inteligência (consulta conversacional ao advogado), RAVI Gestão (prazos, agenda, financeiro)
 
 ## Próximas tarefas
-1. Usuário fornece credenciais Meta → ativar conexão WhatsApp real
-2. Testar envio/recebimento real Meta→webhook→RAVI→Meta
-3. Importação de processo por PDF
+1. FASE 7: Relatórios, Analytics, Health Check aprofundado, exportações CSV/PDF (P1) — aguardando escolha do usuário
+2. FASE 8: Suporte, Impersonation controlado, tickets administrativos (P1)
+3. Gateway de pagamento real (Stripe/Mercado Pago/Asaas) sobre a camada de abstração existente
+4. Usuário fornece credenciais Meta (META_APP_ID/META_APP_SECRET/META_CONFIG_ID) → ativar Embedded Signup real
+
+## Backlog menor (action items iteration_14 — opcionais, sem impacto funcional)
+- Semântica do contador de alertas de consumo: hoje conta TODOS os eventos (inbound+outbound, faturáveis ou não) contra o message_limit — confirmar com produto se deve contar só outbound/faturáveis
+- Validar unicidade de fatura WhatsApp pendente por (office_id, período) antes de gerar nova
+- PATCH de tarifas Meta/RAVI sobrescreve in-place; planos versionam — considerar versionamento explícito de tarifas
+- Trocar <input type='date'> nativo por Popover+Calendar shadcn em /admin/whatsapp/pricing e /admin/logs (formato pt-BR)

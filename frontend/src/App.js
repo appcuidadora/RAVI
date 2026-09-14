@@ -27,6 +27,7 @@ import AdminUsuarios from "@/pages/admin/AdminUsuarios";
 import AdminPlanos from "@/pages/admin/AdminPlanos";
 import AdminFinanceiro from "@/pages/admin/AdminFinanceiro";
 import AdminWhatsApp from "@/pages/admin/AdminWhatsApp";
+import AdminWhatsAppPricing from "@/pages/admin/AdminWhatsAppPricing";
 import AdminSuporte from "@/pages/admin/AdminSuporte";
 import AdminRelatorios from "@/pages/admin/AdminRelatorios";
 import AdminLogs from "@/pages/admin/AdminLogs";
@@ -86,6 +87,7 @@ function AppRoutes() {
         <Route path="planos" element={<AdminPlanos />} />
         <Route path="financeiro" element={<AdminFinanceiro />} />
         <Route path="whatsapp" element={<AdminWhatsApp />} />
+        <Route path="whatsapp/pricing" element={<AdminWhatsAppPricing />} />
         <Route path="suporte" element={<AdminSuporte />} />
         <Route path="relatorios" element={<AdminRelatorios />} />
         <Route path="logs" element={<AdminLogs />} />

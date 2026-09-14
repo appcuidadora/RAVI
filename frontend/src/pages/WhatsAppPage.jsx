@@ -37,8 +37,13 @@ export default function WhatsAppPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [testToken, setTestToken] = useState("");
   const [connectingTest, setConnectingTest] = useState(false);
+  const [usage, setUsage] = useState(null);
 
-  const load = () => api.get("/whatsapp/status").then((r) => setStatus(r.data)).catch(() => {});
+  const load = () => {
+    api.get("/whatsapp/status").then((r) => setStatus(r.data)).catch(() => {});
+    api.get("/whatsapp/usage").then((r) => setUsage(r.data)).catch(() => {});
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line
 
   useEffect(() => {
     load();
@@ -230,6 +235,40 @@ export default function WhatsAppPage() {
                   {connectingTest ? <Loader2 size={15} className="animate-spin" /> : "Ativar"}
                 </Button>
               </form>
+            </div>
+          )}
+        </div>
+      )}
+
+      {usage && usage.mensagens_total > 0 && (
+        <div className="rounded-xl border border-[#23283E] bg-[#0F111A] p-6 space-y-4 fade-up" data-testid="consumo-card">
+          <div className="flex items-center justify-between">
+            <h3 className="font-display font-semibold text-zinc-200">Consumo WhatsApp</h3>
+            <span className="font-mono-code text-[10px] uppercase tracking-widest text-zinc-500">Período {usage.periodo}</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div><p className="font-mono-code text-[10px] uppercase tracking-widest text-zinc-500">Mensagens faturáveis</p>
+              <p className="font-display text-xl font-bold text-zinc-100 mt-1" data-testid="consumo-faturaveis">{usage.mensagens_faturaveis}</p></div>
+            <div><p className="font-mono-code text-[10px] uppercase tracking-widest text-zinc-500">Valor acumulado</p>
+              <p className="font-display text-xl font-bold text-zinc-100 mt-1" data-testid="consumo-acumulado">R$ {usage.valor_acumulado.toFixed(2)}</p></div>
+            <div><p className="font-mono-code text-[10px] uppercase tracking-widest text-zinc-500">Já faturado</p>
+              <p className="font-display text-xl font-bold text-zinc-400 mt-1" data-testid="consumo-faturado">R$ {usage.valor_faturado.toFixed(2)}</p></div>
+            <div><p className="font-mono-code text-[10px] uppercase tracking-widest text-zinc-500">A pagar</p>
+              <p className="font-display text-xl font-bold brand-gradient-text mt-1" data-testid="consumo-a-pagar">R$ {usage.valor_a_pagar.toFixed(2)}</p></div>
+          </div>
+          {usage.historico.length > 0 && (
+            <div className="pt-3 border-t border-[#23283E]" data-testid="consumo-historico">
+              <p className="font-mono-code text-[10px] uppercase tracking-widest text-zinc-500 mb-2">Histórico por dia</p>
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {usage.historico.map((h, i) => (
+                  <div key={i} className="flex items-center justify-between text-xs py-1" data-testid={`consumo-dia-${i}`}>
+                    <span className="text-zinc-500">{new Date(h.data + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}</span>
+                    <span className="text-zinc-400">{h.categoria}</span>
+                    <span className="text-zinc-400">{h.faturavel} faturáveis × R$ {h.unitario}</span>
+                    <span className="text-zinc-200">R$ {h.valor.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

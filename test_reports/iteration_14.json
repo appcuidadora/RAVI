@@ -1,0 +1,54 @@
+{
+  "summary": "FASE 6 (WhatsApp billing) validada end-to-end. Novo arquivo /app/backend/tests/test_phase6_billing.py com 19 testes cobrindo: CRUD tarifas Meta e RAVI por plano (auth+validation+versionamento), congelamento de preços em record_usage_event (evento antigo NÃO muta quando tarifa muda; evento novo usa nova tarifa — validado via delta na receita consolidada), hooks de uso no pipeline via POST /api/conversations/{id}/client-message (mensagens_total aumenta após inbound+resposta RAVI), GET /api/whatsapp/usage retornando todos os campos esperados (periodo, mensagens_total/faturaveis/gratuitas, valor_acumulado/faturado/a_pagar, por_categoria, historico, faturas) + isolamento multi-tenant, versionamento automático de planos (PATCH cria plan_version v2 com effective_from hoje e encerra v1 com effective_to+status='encerrada'), mudança de plano 'immediate' (troca plan_id imediatamente + cria subscription active) e 'next_cycle' (preenche pending_plan_id sem mudar plan_id), faturamento WhatsApp (RAVI-WA-YYYYMM-NNNN, itens por categoria, eventos marcados com invoice_id, gerar novamente retorna 400 sem consumo), ajustes manuais exigem motivo (400 sem motivo), alertas de consumo tipo 'monitoring' criados no /api/alerts ao atingir % do limite (nunca bloqueia), e consolidado admin GET /api/admin/reports/whatsapp com receita/custo/margem/por_escritorio/por_categoria/por_periodo. TODOS 19/19 PASSING. Regressão global pytest tests/: 162 passed, 6 skipped, 0 failed (aumento de 20 testes vs iter13 mantendo 100% verde). Frontend testado com Playwright: /admin/whatsapp/pricing renderiza 3 cards (Meta rates, Customer rates, Consumption alerts) com dialog de criação funcional; /admin/relatorios renderiza bloco 'WhatsApp — Consolidado (consumo)' mostrando Receita R$92.34, Custo Meta R$28.01, Margem R$64.33, 135 faturáveis, breakdown UTILITY/SERVICE/AUTHENTICATION; /whatsapp (tenant) renderiza painel 'Consumo WhatsApp' com faturaveis=29, acumulado=R$87.19, a_pagar=R$15.74.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/admin/pricing/customer", "issue": "Expressão suspeita em admin_routes.py:792 — `for p in plans.values() and await db.plans.find(...)` usa short-circuit `and` para retornar a lista awaited quando plans não é vazio. Funciona por acidente mas é código confuso e redundante (plans já foi carregado antes). Sugerir: `\"plans\": [{\"id\": p[\"id\"], \"name\": p[\"name\"]} for p in plans.values()]`."},
+      {"endpoint": "GET /api/whatsapp/usage", "issue": "Campo 'historico' captura 'unitario' apenas do PRIMEIRO evento de cada (dia,categoria). Se preços mudarem no mesmo dia (comum em cenários de re-precificação), o unitario exibido pode não refletir o preço médio nem o mais recente. Considerar remover o campo, expor preço médio (valor/faturavel), ou listar unitarios distintos."},
+      {"endpoint": "POST /api/admin/pricing/meta", "issue": "PATCH em /admin/pricing/meta/{id} sobrescreve tarifa in-place em vez de versionar (create novo registro com effective_from). Como get_meta_rate seleciona por effective_from<=today desc, funcional, mas perde histórico. Considerar tornar versionamento explícito como plans/versions."},
+      {"endpoint": "record_usage_event / usage.py:80", "issue": "check_consumption_alerts compara `used >= limit*pct/100` onde used = count_documents({office_id, billing_period}) — inclui eventos NÃO faturáveis (billable=False) e inbound. Se a intenção do plano é 'limite de mensagens enviadas', deveria filtrar por direction=outbound ou billable=True. Confirmar com o produto."},
+      {"endpoint": "POST /api/admin/billing/whatsapp-invoices/generate", "issue": "Não valida se already existe fatura pending do mesmo (office_id, period). Duas chamadas seguidas com eventos novos entre elas geram 2 faturas do mesmo período. Não é bug crítico (invoice_number único) mas pode confundir."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/admin/whatsapp/pricing", "issues": ["Formulário Meta usa <input type='date'> nativo do browser (mm/dd/yyyy US) para effective_from — mesmo padrão inconsistente reportado em iter13 para /admin/logs. Trocar por Popover+Calendar shadcn para consistência e formato pt-BR."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase6_billing.py",
+    "/app/test_reports/pytest/phase6.xml",
+    "/app/test_reports/pytest/full.xml"
+  ],
+  "action_items": [
+    "(cleanup) Simplificar expressão redundante em admin_routes.py:792: `[{\"id\":p[\"id\"],\"name\":p[\"name\"]} for p in plans.values()]`",
+    "(opcional) Confirmar semântica do 'used' em check_consumption_alerts (todos eventos vs. só faturáveis/outbound)",
+    "(opcional) Validar unicidade de fatura WhatsApp por (office_id, period, status='pending') antes de gerar nova",
+    "(opcional) Versionar tarifas Meta/Customer com effective_until em PATCH ao invés de sobrescrever",
+    "(UX) Trocar <input type='date'> por Calendar shadcn em /admin/whatsapp/pricing e /admin/logs"
+  ],
+  "critical_code_review_comments": [
+    "usage.record_usage_event: BOM — congelamento validado em teste (delta de receita bate com nova tarifa; receita histórica não muda quando tarifa é alterada).",
+    "PlanVersion: BOM — PATCH em plans só cria nova versão se COMMERCIAL_FIELDS mudarem (evita spam de versões). Encerramento com effective_until + status='encerrada'.",
+    "Subscription 'next_cycle': BOM — plan_id NÃO troca, apenas pending_plan_id. Confirmado em teste. Subscription é inserted como 'scheduled' (não ativa).",
+    "Adjustment sem motivo → 400: BOM.",
+    "Fatura WhatsApp: BOM — invoice_number RAVI-WA-YYYYMM-NNNN, eventos billable=True + invoice_id=None são consumidos e marcados; segunda geração no mesmo período retorna 400 corretamente.",
+    "Alerta de consumo: idempotente via usage_alert_marks (office_id,period,pct). Verificado.",
+    "Consolidado admin: margem = receita - custo (assertado com tolerância).",
+    "Multi-tenant: /api/whatsapp/usage usa office_filter(user). Confirmado.",
+    "admin_routes.py:792 tem código estranho `for p in plans.values() and await db.plans.find(...)` — redundante mas funciona.",
+    "PATCH /api/admin/pricing/meta/{id} sobrescreve sem versionar (comparar com /plans que versiona)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase6_billing.py (novo — 19 testes)"
+  ],
+  "success_rate": {"backend": "100% Fase 6 (19/19); regressão global 162/168 passed, 6 skipped, 0 failed", "frontend": "100% dos fluxos críticos da Fase 6 (/admin/whatsapp/pricing, /admin/relatorios com bloco Consolidado, /whatsapp com painel Consumo)"},
+  "test_credentials": "SUPER_ADMIN: construcaovilanova@gmail.com / Ravi@2026 (em /admin/login e /login). Cookies distintos: admin_access_token (8h) vs access_token (tenant).",
+  "seed_data_creation": "Testes criam: (a) diversas tarifas Meta/Customer (UTILITY, AUTHENTICATION, SERVICE) com effective_from 2020-01-01 e hoje; (b) 1 plano TEST_Plan_xxx e 1 plano TEST_LowLimit_xxx (limit=5) via /admin/plans — este último é usado para forçar alerta de consumo e depois o office volta ao plano original; (c) eventos de consumo AUTHENTICATION/UTILITY/SERVICE no office Silva Advocacia (~15-25 eventos por run); (d) 1 fatura WhatsApp RAVI-WA-YYYYMM-NNNN por run; (e) 1 ajuste manual (crédito R$10 motivo='Cortesia por indisponibilidade'). Main agent pode limpar via: db.plans.deleteMany({name:/^TEST_/}); db.whatsapp_pricing/customer_rates via created_by admin; whatsapp_usage_events/invoices/billing_adjustments crescem indefinidamente entre runs.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Fase 6 test file em /app/backend/tests/test_phase6_billing.py com 19 testes, todos verdes em serial e paralelo (xdist loadscope). Regressão global 162/168 passed, 6 skipped (Meta token 24h expirado — comportamento esperado), 0 failed. Frontend Fase 6 confirmado renderizando dados reais (bloco Consolidado mostra R$92.34 receita, R$28.01 custo Meta, R$64.33 margem; painel /whatsapp mostra 29 faturáveis, R$87.19 acumulado, R$15.74 a pagar). O teste 'test_prices_frozen_at_event_time' resolve plan_id dinamicamente antes de cada evento para tolerar concorrência com outros testes que trocam o plano do office (TestConsumptionAlerts, TestPlanChange). Se main agent adicionar restauração explícita de plano no TestConsumptionAlerts (já feito via try/finally) mantendo o office_id no plano original, isso permanece estável. TestPlanChange::test_next_cycle_sets_pending_plan deixa `pending_plan_id` populado — se produção implementar rollover automático via cron, esse teste precisa ser ajustado. Alertas de consumo comparam TODOS eventos (inbound+outbound, faturáveis ou não) contra message_limit — confirmar semântica com produto se for necessário.",
+  "rca of the issue": "N/A — Fase 6 atende à especificação. Ressalvas menores (código redundante em admin_routes.py:792, versionamento inconsistente entre plans (versiona) e pricing (sobrescreve), semântica de 'used' em alerts contando eventos não faturáveis) são action items sem impacto funcional imediato."
+}

@@ -23,7 +23,11 @@ function Row({ label, value }) {
 
 export default function AdminRelatorios() {
   const [r, setR] = useState(null);
-  useEffect(() => { api.get("/admin/reports").then((x) => setR(x.data)).catch(() => {}); }, []);
+  const [wa, setWa] = useState(null);
+  useEffect(() => {
+    api.get("/admin/reports").then((x) => setR(x.data)).catch(() => {});
+    api.get("/admin/reports/whatsapp").then((x) => setWa(x.data)).catch(() => {});
+  }, []);
 
   if (!r) return <div className="p-8 text-zinc-500" data-testid="relatorios-loading">Carregando…</div>;
 
@@ -62,6 +66,16 @@ export default function AdminRelatorios() {
           <Row label="escalonamentos" value={r.ia.escalonamentos} />
           <Row label="taxa de resolução" value={`${r.ia.taxa_resolucao}%`} />
         </Block>
+        {wa && (
+          <Block title="WhatsApp — Consolidado (consumo)" tid="rep-whatsapp-consumo">
+            <Row label="mensagens faturáveis" value={wa.mensagens_faturaveis} />
+            <Row label="mensagens gratuitas" value={wa.mensagens_gratuitas} />
+            <Row label="custo Meta estimado" value={fmt(wa.custo_meta_estimado)} />
+            <Row label="receita WhatsApp" value={fmt(wa.receita_whatsapp)} />
+            <Row label="margem estimada" value={fmt(wa.margem_estimada)} />
+            {Object.entries(wa.por_categoria).map(([k, v]) => <Row key={k} label={k} value={v} />)}
+          </Block>
+        )}
       </div>
     </div>
   );

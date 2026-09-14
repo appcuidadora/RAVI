@@ -9,6 +9,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 from database import db
 from security import hash_password, verify_password, get_jwt_secret
+from usage import record_usage_event, CATEGORIES, current_period
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -220,6 +221,7 @@ class OfficePatch(BaseModel):
     name: Optional[str] = None
     status: Optional[str] = None
     plan_id: Optional[str] = None
+    plan_apply: Optional[str] = None
     valor_mensal: Optional[float] = None
     valor_anual: Optional[float] = None
     ciclo: Optional[str] = None
@@ -233,6 +235,7 @@ async def update_office(office_id: str, data: OfficePatch, admin: dict = Depends
     if not office:
         raise HTTPException(404, "Escritório não encontrado")
     updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    plan_apply = updates.pop("plan_apply", None) or "immediate"
     if "status" in updates and updates["status"] not in ("trial", "active", "past_due", "suspended", "canceled"):
         raise HTTPException(400, "Status inválido")
     if updates.get("plan_id") and updates["plan_id"] != office.get("plan_id"):
@@ -246,6 +249,20 @@ async def update_office(office_id: str, data: OfficePatch, admin: dict = Depends
         await db.plan_changes.insert_one({"id": uuid.uuid4().hex, "office_id": office_id,
                                           "de": (old_plan or {}).get("name"), "para": (new_plan or {}).get("name"),
                                           "direction": direction, "admin": admin["email"], "created_at": now_iso()})
+        target_plan = updates.get("plan_id")
+        new_version = await db.plan_versions.find_one({"plan_id": target_plan, "effective_until": None},
+                                                      {"_id": 0}, sort=[("version", -1)])
+        if plan_apply == "next_cycle":
+            updates["pending_plan_id"] = target_plan
+            del updates["plan_id"]
+        await db.subscriptions.insert_one({
+            "id": uuid.uuid4().hex, "office_id": office_id, "plan_id": target_plan,
+            "plan_version_id": (new_version or {}).get("id"),
+            "status": "scheduled" if plan_apply == "next_cycle" else "active",
+            "effective_from": None if plan_apply == "next_cycle" else now_iso()[:10],
+            "created_by": admin["email"], "created_at": now_iso()})
+        await admin_log(admin, "subscription_changed", office_id=office_id,
+                        plan=(new_plan or {}).get("name"), apply=plan_apply)
     if updates.get("status") == "canceled":
         await db.cancellations.insert_one({"id": uuid.uuid4().hex, "office_id": office_id,
                                            "plano_anterior": office.get("plan_id"),
@@ -307,16 +324,48 @@ async def list_plans(admin: dict = Depends(get_current_admin)):
 async def create_plan(data: PlanIn, admin: dict = Depends(get_current_admin)):
     plan = {"id": uuid.uuid4().hex, **data.model_dump(), "created_at": now_iso()}
     await db.plans.insert_one(plan)
+    await db.plan_versions.insert_one(_plan_version(plan, 1, admin))
     await admin_log(admin, "plan_created", plan=data.name)
     plan.pop("_id", None)
     return plan
 
 
+def _plan_version(plan: dict, version: int, admin: dict) -> dict:
+    return {"id": uuid.uuid4().hex, "plan_id": plan["id"], "version": version,
+            "process_limit": plan.get("process_limit"), "monthly_price": plan.get("price_monthly"),
+            "annual_price": plan.get("price_yearly"), "user_limit": plan.get("user_limit"),
+            "resource_limits": {"message_limit": plan.get("message_limit"), "ai_quota": plan.get("ai_quota"),
+                                "overage_pct": plan.get("overage_pct")},
+            "effective_from": now_iso()[:10], "effective_until": None,
+            "created_by": admin["email"], "status": "ativo", "created_at": now_iso()}
+
+
+COMMERCIAL_FIELDS = ("process_limit", "price_monthly", "price_yearly", "user_limit", "message_limit", "ai_quota", "overage_pct")
+
+
+@router.get("/plans/{plan_id}/versions")
+async def list_plan_versions(plan_id: str, admin: dict = Depends(get_current_admin)):
+    return await db.plan_versions.find({"plan_id": plan_id}, {"_id": 0}).sort("version", -1).to_list(50)
+
+
 @router.patch("/plans/{plan_id}")
 async def update_plan(plan_id: str, data: PlanIn, admin: dict = Depends(get_current_admin)):
-    res = await db.plans.update_one({"id": plan_id}, {"$set": data.model_dump()})
-    if not res.matched_count:
+    old = await db.plans.find_one({"id": plan_id}, {"_id": 0})
+    if not old:
         raise HTTPException(404, "Plano não encontrado")
+    new_data = data.model_dump()
+    await db.plans.update_one({"id": plan_id}, {"$set": new_data})
+    commercial_changed = any(old.get(k) != new_data.get(k) for k in COMMERCIAL_FIELDS)
+    if commercial_changed:
+        last_v = await db.plan_versions.find_one({"plan_id": plan_id, "effective_until": None},
+                                                 {"_id": 0}, sort=[("version", -1)])
+        if last_v:
+            await db.plan_versions.update_one({"id": last_v["id"]},
+                                              {"$set": {"effective_until": now_iso()[:10], "status": "encerrada"}})
+        merged = {**old, **new_data}
+        await db.plan_versions.insert_one(_plan_version(merged, (last_v["version"] + 1) if last_v else 1, admin))
+        await admin_log(admin, "plan_version_created", plan=data.name,
+                        version=(last_v["version"] + 1) if last_v else 1)
     await admin_log(admin, "plan_updated", plan=data.name)
     return await db.plans.find_one({"id": plan_id}, {"_id": 0})
 
@@ -684,6 +733,264 @@ async def put_ai_settings(data: AIConfigIn, admin: dict = Depends(get_current_ad
         await db.platform_settings.update_one({"id": "global"}, {"$set": updates}, upsert=True)
         await admin_log(admin, "ai_config_updated", keys=list(data.model_dump(exclude_none=True).keys()))
     return await get_ai_settings(admin)
+
+
+# ---------- CONSUMO WHATSAPP: TARIFAS, FATURAS, AJUSTES ----------
+
+class MetaPricingIn(BaseModel):
+    category: str
+    meta_rate: float
+    country: Optional[str] = "BR"
+    currency: Optional[str] = "BRL"
+    pricing_unit: Optional[str] = "MESSAGE"
+    effective_from: str
+    effective_until: Optional[str] = None
+    status: Optional[str] = "ativo"
+
+
+@router.get("/pricing/meta")
+async def list_meta_pricing(admin: dict = Depends(get_current_admin)):
+    return await db.whatsapp_pricing.find({}, {"_id": 0}).sort("effective_from", -1).to_list(200)
+
+
+@router.post("/pricing/meta")
+async def create_meta_pricing(data: MetaPricingIn, admin: dict = Depends(get_current_admin)):
+    if data.category not in CATEGORIES:
+        raise HTTPException(400, f"Categoria inválida. Use: {', '.join(CATEGORIES)}")
+    row = {"id": uuid.uuid4().hex, **data.model_dump(), "created_by": admin["email"], "created_at": now_iso()}
+    await db.whatsapp_pricing.insert_one(row)
+    await admin_log(admin, "meta_pricing_created", category=data.category, meta_rate=data.meta_rate)
+    row.pop("_id", None)
+    return row
+
+
+@router.patch("/pricing/meta/{rate_id}")
+async def update_meta_pricing(rate_id: str, data: MetaPricingIn, admin: dict = Depends(get_current_admin)):
+    res = await db.whatsapp_pricing.update_one({"id": rate_id}, {"$set": data.model_dump()})
+    if not res.matched_count:
+        raise HTTPException(404, "Tarifa não encontrada")
+    await admin_log(admin, "meta_pricing_updated", rate_id=rate_id, meta_rate=data.meta_rate)
+    return {"ok": True}
+
+
+class CustomerRateIn(BaseModel):
+    plan_id: str
+    category: str
+    customer_rate: float
+    currency: Optional[str] = "BRL"
+    effective_from: str
+    effective_until: Optional[str] = None
+    status: Optional[str] = "ativo"
+
+
+@router.get("/pricing/customer")
+async def list_customer_rates(admin: dict = Depends(get_current_admin)):
+    rates = await db.whatsapp_customer_rates.find({}, {"_id": 0}).sort("effective_from", -1).to_list(300)
+    plans = {p["id"]: p["name"] for p in await db.plans.find({}, {"_id": 0}).to_list(100)}
+    for r in rates:
+        r["plan_name"] = plans.get(r["plan_id"], "—")
+    return {"rates": rates, "plans": [{"id": pid, "name": name} for pid, name in plans.items()]}
+
+
+@router.post("/pricing/customer")
+async def create_customer_rate(data: CustomerRateIn, admin: dict = Depends(get_current_admin)):
+    if data.category not in CATEGORIES:
+        raise HTTPException(400, f"Categoria inválida. Use: {', '.join(CATEGORIES)}")
+    if not await db.plans.find_one({"id": data.plan_id}):
+        raise HTTPException(404, "Plano não encontrado")
+    row = {"id": uuid.uuid4().hex, **data.model_dump(), "created_by": admin["email"], "created_at": now_iso()}
+    await db.whatsapp_customer_rates.insert_one(row)
+    await admin_log(admin, "customer_rate_created", plan_id=data.plan_id,
+                    category=data.category, customer_rate=data.customer_rate)
+    row.pop("_id", None)
+    return row
+
+
+@router.patch("/pricing/customer/{rate_id}")
+async def update_customer_rate(rate_id: str, data: CustomerRateIn, admin: dict = Depends(get_current_admin)):
+    res = await db.whatsapp_customer_rates.update_one({"id": rate_id}, {"$set": data.model_dump()})
+    if not res.matched_count:
+        raise HTTPException(404, "Tarifa não encontrada")
+    await admin_log(admin, "customer_rate_updated", rate_id=rate_id, customer_rate=data.customer_rate)
+    return {"ok": True}
+
+
+class UsageEventIn(BaseModel):
+    office_id: str
+    category: str
+    billable: bool = True
+    quantity: int = 1
+
+
+@router.post("/usage-events")
+async def create_usage_events(data: UsageEventIn, admin: dict = Depends(get_current_admin)):
+    """Registro administrativo de eventos de consumo (testes, backfill, ajustes operacionais)."""
+    if not await db.offices.find_one({"id": data.office_id}):
+        raise HTTPException(404, "Escritório não encontrado")
+    if data.category not in CATEGORIES:
+        raise HTTPException(400, f"Categoria inválida. Use: {', '.join(CATEGORIES)}")
+    if not (1 <= data.quantity <= 500):
+        raise HTTPException(400, "Quantidade deve ser entre 1 e 500")
+    for _ in range(data.quantity):
+        await record_usage_event(data.office_id, "outbound", data.category, data.billable)
+    await admin_log(admin, "usage_events_recorded", office_id=data.office_id,
+                    category=data.category, quantity=data.quantity, billable=data.billable)
+    return {"ok": True, "recorded": data.quantity}
+
+
+class WaInvoiceGenIn(BaseModel):
+    office_id: str
+    period: str
+    due_date: Optional[str] = None
+    discount: Optional[float] = 0
+    tax: Optional[float] = 0
+
+
+@router.post("/billing/whatsapp-invoices/generate")
+async def generate_wa_invoice(data: WaInvoiceGenIn, admin: dict = Depends(get_current_admin)):
+    events = await db.whatsapp_usage_events.find(
+        {"office_id": data.office_id, "billing_period": data.period, "billable": True, "invoice_id": None},
+        {"_id": 0}).to_list(20000)
+    if not events:
+        raise HTTPException(400, "Sem consumo faturável no período")
+    by_cat = {}
+    for e in events:
+        c = e["billing_category"]
+        by_cat.setdefault(c, {"category": c, "quantity": 0, "unit_price": e["ravi_price"], "amount": 0.0})
+        by_cat[c]["quantity"] += 1
+        by_cat[c]["amount"] = round(by_cat[c]["amount"] + e["ravi_price"], 4)
+    items = [{**v, "reference": f"Consumo WhatsApp {v['category']} — {data.period}"} for v in by_cat.values()]
+    subtotal = round(sum(i["amount"] for i in items), 2)
+    total = round(subtotal - (data.discount or 0) + (data.tax or 0), 2)
+    seq = await db.whatsapp_invoices.count_documents({}) + 1
+    invoice = {
+        "id": uuid.uuid4().hex, "office_id": data.office_id, "billing_period": data.period,
+        "invoice_number": f"RAVI-WA-{data.period.replace('-', '')}-{seq:04d}",
+        "issue_date": now_iso()[:10],
+        "due_date": data.due_date or (datetime.now(timezone.utc) + timedelta(days=10)).date().isoformat(),
+        "subtotal": subtotal, "discount": data.discount or 0, "tax": data.tax or 0,
+        "total": total, "status": "pending", "items": items,
+        "created_by": admin["email"], "created_at": now_iso(),
+    }
+    await db.whatsapp_invoices.insert_one(invoice)
+    await db.whatsapp_usage_events.update_many({"id": {"$in": [e["id"] for e in events]}},
+                                               {"$set": {"invoice_id": invoice["id"]}})
+    await db.billing_periods.update_one(
+        {"office_id": data.office_id, "period": data.period},
+        {"$set": {"id": uuid.uuid4().hex, "office_id": data.office_id, "start_date": f"{data.period}-01",
+                  "end_date": data.period, "message_count": len(events), "billable_count": len(events),
+                  "total_amount": subtotal, "invoiced_amount": total, "paid_amount": 0,
+                  "status": "invoiced", "updated_at": now_iso()},
+         "$setOnInsert": {"created_at": now_iso()}},
+        upsert=True)
+    await admin_log(admin, "whatsapp_invoice_generated", office_id=data.office_id,
+                    period=data.period, total=total, number=invoice["invoice_number"])
+    invoice.pop("_id", None)
+    return invoice
+
+
+@router.get("/billing/whatsapp-invoices")
+async def list_wa_invoices(office_id: str = "", status: str = "all", admin: dict = Depends(get_current_admin)):
+    q = {}
+    if office_id:
+        q["office_id"] = office_id
+    if status != "all":
+        q["status"] = status
+    invoices = await db.whatsapp_invoices.find(q, {"_id": 0}).sort("issue_date", -1).to_list(300)
+    names = {o["id"]: o["name"] for o in await db.offices.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)}
+    for inv in invoices:
+        inv["office_name"] = names.get(inv["office_id"], "—")
+    return invoices
+
+
+@router.post("/billing/whatsapp-invoices/{invoice_id}/pay")
+async def pay_wa_invoice(invoice_id: str, data: PayIn, admin: dict = Depends(get_current_admin)):
+    inv = await db.whatsapp_invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(404, "Fatura não encontrada")
+    if inv["status"] != "pending":
+        raise HTTPException(400, "Fatura não está pendente")
+    await db.whatsapp_invoices.update_one({"id": invoice_id}, {"$set": {"status": "paid", "paid_at": now_iso()}})
+    await db.payments.insert_one({"id": uuid.uuid4().hex, "invoice_id": invoice_id,
+                                  "office_id": inv["office_id"], "valor": data.valor,
+                                  "metodo": data.metodo, "referencia": data.referencia or "",
+                                  "created_by": admin["email"], "created_at": now_iso()})
+    await admin_log(admin, "whatsapp_invoice_paid", office_id=inv["office_id"], valor=data.valor)
+    return {"ok": True}
+
+
+class AdjustmentIn(BaseModel):
+    office_id: str
+    tipo: str
+    valor: float
+    motivo: str
+    referencia: Optional[str] = ""
+
+
+@router.post("/billing/adjustments")
+async def create_adjustment(data: AdjustmentIn, admin: dict = Depends(get_current_admin)):
+    if data.tipo not in ("credito", "desconto", "estorno", "ajuste_consumo"):
+        raise HTTPException(400, "Tipo inválido")
+    if not data.motivo.strip():
+        raise HTTPException(400, "Informe o motivo do ajuste")
+    adj = {"id": uuid.uuid4().hex, **data.model_dump(), "created_by": admin["email"], "created_at": now_iso()}
+    await db.billing_adjustments.insert_one(adj)
+    await admin_log(admin, "billing_adjustment", office_id=data.office_id, tipo=data.tipo, valor=data.valor)
+    adj.pop("_id", None)
+    return adj
+
+
+@router.get("/billing/adjustments")
+async def list_adjustments(office_id: str = "", admin: dict = Depends(get_current_admin)):
+    q = {"office_id": office_id} if office_id else {}
+    return await db.billing_adjustments.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
+
+
+@router.get("/reports/whatsapp")
+async def whatsapp_consolidated_report(admin: dict = Depends(get_current_admin)):
+    events = await db.whatsapp_usage_events.find({}, {"_id": 0}).to_list(50000)
+    billable = [e for e in events if e["billable"]]
+    names = {o["id"]: o["name"] for o in await db.offices.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)}
+    by_office, by_cat, by_period = {}, {}, {}
+    for e in billable:
+        by_office.setdefault(names.get(e["office_id"], e["office_id"]), {"mensagens": 0, "valor": 0.0, "custo_meta": 0.0})
+        by_office[names.get(e["office_id"], e["office_id"])]["mensagens"] += 1
+        by_office[names.get(e["office_id"], e["office_id"])]["valor"] = round(by_office[names.get(e["office_id"], e["office_id"])]["valor"] + e["ravi_price"], 4)
+        by_office[names.get(e["office_id"], e["office_id"])]["custo_meta"] = round(by_office[names.get(e["office_id"], e["office_id"])]["custo_meta"] + e["meta_cost"], 4)
+        by_cat.setdefault(e["billing_category"], 0)
+        by_cat[e["billing_category"]] += 1
+        by_period.setdefault(e["billing_period"], {"mensagens": 0, "valor": 0.0})
+        by_period[e["billing_period"]]["mensagens"] += 1
+        by_period[e["billing_period"]]["valor"] = round(by_period[e["billing_period"]]["valor"] + e["ravi_price"], 4)
+    receita = round(sum(e["ravi_price"] for e in billable), 2)
+    custo = round(sum(e["meta_cost"] for e in billable), 2)
+    return {
+        "mensagens_faturaveis": len(billable),
+        "mensagens_gratuitas": len(events) - len(billable),
+        "receita_whatsapp": receita, "custo_meta_estimado": custo,
+        "margem_estimada": round(receita - custo, 2),
+        "por_escritorio": by_office, "por_categoria": by_cat, "por_periodo": by_period,
+    }
+
+
+@router.get("/settings/consumption")
+async def get_consumption_settings(admin: dict = Depends(get_current_admin)):
+    doc = await db.platform_settings.find_one({"id": "global"}, {"_id": 0})
+    return {"alert_pcts": (doc or {}).get("consumption_alert_pcts") or [70, 80, 90]}
+
+
+class ConsumptionSettingsIn(BaseModel):
+    alert_pcts: list
+
+
+@router.put("/settings/consumption")
+async def put_consumption_settings(data: ConsumptionSettingsIn, admin: dict = Depends(get_current_admin)):
+    pcts = [int(p) for p in data.alert_pcts if 1 <= int(p) <= 100]
+    if not pcts:
+        raise HTTPException(400, "Informe percentuais entre 1 e 100")
+    await db.platform_settings.update_one({"id": "global"}, {"$set": {"consumption_alert_pcts": pcts}}, upsert=True)
+    await admin_log(admin, "consumption_alerts_configured", pcts=pcts)
+    return {"alert_pcts": pcts}
 
 
 # ---------- RELATÓRIOS ----------

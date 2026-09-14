@@ -6,6 +6,7 @@ from utils import normalize_phone
 from security import audit
 from ai import classify_message, generate_ravi_reply, ESCALATION_REPLY
 from whatsapp_meta import graph_send_text
+from usage import record_usage_event
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,9 @@ async def handle_inbound_message(office_id: str, phone: str, text: str,
             await audit(office_id, "unidentified_contact", conversation_id=conv["id"], phone=norm)
 
     await save_message(office_id, conv["id"], "client", text, meta_message_id=meta_message_id, kind=kind)
+    await record_usage_event(office_id, "inbound", "SERVICE", False,
+                             connection_id=(connection or {}).get("id"), conversation_id=conv["id"],
+                             meta_message_id=meta_message_id, message_type=kind)
     await audit(office_id, "message_received", conversation_id=conv["id"],
                 client_id=client["id"] if client else None, text=text[:200])
 
@@ -134,6 +138,9 @@ async def handle_inbound_message(office_id: str, phone: str, text: str,
 
     await save_message(office_id, conv["id"], "ravi", reply, risk_level=level,
                        meta_message_id=meta_id, delivered=delivered)
+    await record_usage_event(office_id, "outbound", "SERVICE", False,
+                             connection_id=(connection or {}).get("id"), conversation_id=conv["id"],
+                             meta_message_id=meta_id)
     await audit(office_id, "ravi_reply", conversation_id=conv["id"], client_id=client["id"],
                 risk_level=level, reason=reason, delivered=delivered)
     return {"conversation_id": conv["id"], "action": "ravi_replied", "risk_level": level, "reply": reply}
