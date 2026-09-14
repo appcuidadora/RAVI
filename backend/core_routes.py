@@ -2,7 +2,7 @@ import uuid
 import secrets
 import os
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Depends, Request, BackgroundTasks, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, Request, BackgroundTasks, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional
 from database import db
@@ -64,13 +64,17 @@ class ClientIn(BaseModel):
     name: str
     phone: str
     email: Optional[str] = ""
+    cpf: Optional[str] = ""
     notes: Optional[str] = ""
     responsible_user_id: Optional[str] = None
 
 
 @router.get("/clients")
-async def list_clients(user: dict = Depends(require_permission("clientes"))):
-    clients = await db.clients.find(office_filter(user), {"_id": 0}).sort("created_at", -1).to_list(500)
+async def list_clients(include_archived: bool = False, user: dict = Depends(require_permission("clientes"))):
+    q = office_filter(user)
+    if not include_archived:
+        q["status"] = {"$ne": "arquivado"}
+    clients = await db.clients.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     for c in clients:
         c["processes"] = await db.processes.find(
             {"office_id": user["office_id"], "client_id": c["id"]},
@@ -91,9 +95,9 @@ async def create_client(data: ClientIn, user: dict = Depends(require_permission(
         raise HTTPException(400, "Já existe um cliente com este WhatsApp")
     client = {"id": uuid.uuid4().hex, "office_id": user["office_id"], "name": data.name.strip(),
               "phone": data.phone, "phone_normalized": norm, "email": data.email or "",
-              "notes": data.notes or "", "status": "ativo",
+              "cpf": data.cpf or "", "notes": data.notes or "", "status": "ativo",
               "responsible_user_id": data.responsible_user_id or user["id"],
-              "created_at": now_iso()}
+              "created_at": now_iso(), "updated_at": now_iso()}
     await db.clients.insert_one(client)
     await audit(user["office_id"], "client_created", actor=user["email"], client_id=client["id"])
     client.pop("_id", None)
@@ -105,7 +109,7 @@ async def update_client(client_id: str, data: ClientIn, user: dict = Depends(req
     f = {**office_filter(user), "id": client_id}
     updates = {"name": data.name.strip(), "phone": data.phone,
                "phone_normalized": normalize_phone(data.phone), "email": data.email or "",
-               "notes": data.notes or ""}
+               "cpf": data.cpf or "", "notes": data.notes or "", "updated_at": now_iso()}
     if data.responsible_user_id:
         updates["responsible_user_id"] = data.responsible_user_id
     res = await db.clients.update_one(f, {"$set": updates})
@@ -120,6 +124,34 @@ async def delete_client(client_id: str, user: dict = Depends(require_permission(
     if not res.deleted_count:
         raise HTTPException(404, "Cliente não encontrado")
     return {"ok": True}
+
+
+@router.get("/clients/{client_id}")
+async def get_client(client_id: str, user: dict = Depends(require_permission("clientes"))):
+    client = await db.clients.find_one({**office_filter(user), "id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(404, "Cliente não encontrado")
+    client["processes"] = await db.processes.find(
+        {"office_id": user["office_id"], "client_id": client_id}, {"_id": 0, "documentos": 0}).to_list(50)
+    client["conversations"] = await db.conversations.find(
+        {"office_id": user["office_id"], "client_id": client_id},
+        {"_id": 0}).sort("last_message_at", -1).to_list(10)
+    if client.get("responsible_user_id"):
+        u = await db.users.find_one({"id": client["responsible_user_id"]}, {"_id": 0, "name": 1})
+        client["responsible_name"] = u["name"] if u else None
+    return client
+
+
+@router.post("/clients/{client_id}/archive")
+async def archive_client(client_id: str, user: dict = Depends(require_permission("clientes"))):
+    client = await db.clients.find_one({**office_filter(user), "id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(404, "Cliente não encontrado")
+    new_status = "arquivado" if client.get("status") != "arquivado" else "ativo"
+    await db.clients.update_one({"id": client_id}, {"$set": {"status": new_status, "updated_at": now_iso()}})
+    await audit(user["office_id"], "client_archived" if new_status == "arquivado" else "client_unarchived",
+                actor=user["email"], client_id=client_id)
+    return {"ok": True, "status": new_status}
 
 
 # ---------- PROCESSOS ----------
@@ -138,6 +170,8 @@ class ProcessIn(BaseModel):
     status: Optional[str] = "Em andamento"
     ultima_movimentacao: Optional[str] = ""
     notes: Optional[str] = ""
+    title: Optional[str] = ""
+    subject: Optional[str] = ""
     valor_causa: Optional[float] = None
     forma_pagamento: Optional[str] = ""
     cobrancas: Optional[list] = None
@@ -196,6 +230,8 @@ async def create_process(data: ProcessIn, user: dict = Depends(require_permissio
         "status": data.status or "Em andamento",
         "ultima_movimentacao": data.ultima_movimentacao or "",
         "notes": data.notes or "", "movimentacoes": [], "partes": [],
+        "title": data.title or "", "subject": data.subject or "",
+        "restricted": False, "last_movement_at": data.ultima_movimentacao or "",
         "fontes": fontes, "acesso_restrito": False, "documentos": [],
         "valor_causa": data.valor_causa, "forma_pagamento": data.forma_pagamento or "",
         "cobrancas": [_cobranca_doc(c) for c in (data.cobrancas or []) if c.get("valor") and c.get("data_vencimento")],
@@ -203,6 +239,8 @@ async def create_process(data: ProcessIn, user: dict = Depends(require_permissio
     }
     if parsed:
         proc.update({k: parsed[k] for k in ("segmento", "tribunal", "unidade_origem", "ano", "numero_formatado")})
+        proc["court"] = parsed["tribunal"]
+        proc["unit"] = parsed["unidade_origem"]
         fontes.append("Número CNJ identificado automaticamente")
     if data.ultima_movimentacao:
         proc["movimentacoes"] = [{"data": data.ultima_movimentacao,
@@ -227,6 +265,91 @@ async def get_process(process_id: str, user: dict = Depends(require_permission("
     for d in proc.get("documentos", []):
         d.pop("texto", None)
     return proc
+
+
+@router.post("/processes/import-pdf")
+async def import_process_pdf(file: UploadFile = File(...), client_id: Optional[str] = Form(None),
+                             user: dict = Depends(require_permission("processos"))):
+    """Importação inteligente: lê o PDF, identifica número CNJ, tribunal, partes, movimentações
+    e status. Nunca inventa: campos não identificados são reportados explicitamente."""
+    if not (file.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(400, "Apenas arquivos PDF")
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(400, "PDF deve ter no máximo 10MB")
+    import io as _io
+    from pypdf import PdfReader
+    texto = ""
+    try:
+        reader = PdfReader(_io.BytesIO(data))
+        texto = "\n".join((p.extract_text() or "") for p in reader.pages)
+    except Exception:
+        raise HTTPException(400, "Não consegui ler o conteúdo deste PDF")
+    if not texto.strip():
+        raise HTTPException(400, "Não consegui ler o texto deste PDF (pode ser digitalizado como imagem)")
+
+    import re as _re
+    from ai import extract_process_from_pdf
+    extracted = await extract_process_from_pdf(texto)
+    cnj_found = None
+    for m in _re.finditer(r"\d{7}-?\d{2}\.?\d{4}\.?\d\.?\d{2}\.?\d{4}", texto):
+        parsed = parse_cnj(m.group(0))
+        if parsed:
+            cnj_found = parsed
+            break
+    numero = (extracted.get("numero_cnj") or "").strip()
+    if cnj_found:
+        numero = cnj_found["numero_formatado"]
+    if not numero:
+        numero = f"SEM-NUMERO-{uuid.uuid4().hex[:8]}"
+
+    restricted = bool(extracted.get("restricted"))
+    partes = [{"tipo": p.get("tipo", "outro"), "nome": p.get("nome", "")}
+              for p in (extracted.get("partes") or []) if p.get("nome")]
+    movs = [{"data": m.get("data", ""), "descricao": m.get("descricao", ""),
+             "fonte": "Documento fornecido pelo escritório"}
+            for m in (extracted.get("movimentacoes") or []) if m.get("descricao")]
+    last_mov = extracted.get("ultima_movimentacao") or (movs[0]["data"] if movs else "")
+
+    nao_identificados = []
+    for campo, valor in [("número CNJ", numero if not numero.startswith("SEM-NUMERO") else None),
+                         ("tribunal", extracted.get("tribunal") or (cnj_found or {}).get("tribunal")),
+                         ("assunto", extracted.get("assunto")), ("partes", partes or None),
+                         ("movimentações", movs or None), ("status", extracted.get("status"))]:
+        if not valor:
+            nao_identificados.append(campo)
+
+    proc = {
+        "id": uuid.uuid4().hex, "office_id": user["office_id"],
+        "number": numero, "numero_formatado": numero if not numero.startswith("SEM-NUMERO") else "",
+        "client_id": client_id or None,
+        "title": extracted.get("titulo") or "", "subject": extracted.get("assunto") or "",
+        "status": "Restrito (segredo de justiça)" if restricted else (extracted.get("status") or "Em andamento"),
+        "restricted": restricted, "acesso_restrito": restricted,
+        "tribunal": (cnj_found or {}).get("tribunal") or extracted.get("tribunal"),
+        "court": (cnj_found or {}).get("tribunal") or extracted.get("tribunal"),
+        "segmento": (cnj_found or {}).get("segmento"),
+        "unidade_origem": (cnj_found or {}).get("unidade_origem"),
+        "unit": (cnj_found or {}).get("unidade_origem"),
+        "ano": (cnj_found or {}).get("ano"),
+        "ultima_movimentacao": last_mov, "last_movement_at": last_mov,
+        "notes": "", "movimentacoes": movs, "partes": partes,
+        "fontes": ["Documento fornecido pelo escritório"] + (["Número CNJ identificado automaticamente"] if cnj_found else []),
+        "documentos": [], "valor_causa": None, "forma_pagamento": "", "cobrancas": [],
+        "created_at": now_iso(),
+    }
+    from storage import put_object
+    result = put_object(f"ravi/processos/{user['office_id']}/{uuid.uuid4().hex}.pdf", data, "application/pdf")
+    proc["documentos"] = [{"id": uuid.uuid4().hex, "filename": file.filename, "storage_path": result["path"],
+                           "size": result.get("size", len(data)), "texto": texto[:8000],
+                           "uploaded_by": user["email"], "created_at": now_iso()}]
+    await db.processes.insert_one(proc)
+    await audit(user["office_id"], "process_imported_pdf", actor=user["email"],
+                process_id=proc["id"], restricted=restricted, nao_identificados=nao_identificados)
+    proc.pop("_id", None)
+    for d in proc["documentos"]:
+        d.pop("texto", None)
+    return {"process": proc, "nao_identificados": nao_identificados, "restricted": restricted}
 
 
 # ---------- PROCESSOS: DOCUMENTOS + FINANCEIRO ----------

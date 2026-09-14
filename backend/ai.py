@@ -78,6 +78,43 @@ async def transcribe_audio(data: bytes) -> str:
     return (getattr(resp, "text", "") or "").strip()
 
 
+async def extract_process_from_pdf(texto: str) -> dict:
+    """Extrai dados estruturados de um PDF processual via Claude. Nunca inventa:
+    campos ausentes retornam null e segredo de justiça marca restricted=true."""
+    import json
+    import uuid as _uuid
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    system = (
+        "Você extrai dados de documentos processuais brasileiros. Responda APENAS com JSON válido, sem markdown. "
+        "NUNCA invente informações: se um campo não estiver claramente no documento, use null. "
+        "Se o documento indicar segredo de justiça ou acesso restrito, use restricted=true e NÃO tente extrair conteúdo sigiloso."
+    )
+    schema = {
+        "numero_cnj": "string ou null", "tribunal": "string ou null", "unidade": "string ou null",
+        "assunto": "string ou null", "titulo": "string ou null", "status": "string ou null",
+        "restricted": False, "ultima_movimentacao": "DD/MM/AAAA ou null",
+        "partes": [{"tipo": "cliente|parte_contraria|advogado|outro", "nome": "string"}],
+        "movimentacoes": [{"data": "DD/MM/AAAA", "descricao": "string"}],
+    }
+    chat = LlmChat(
+        api_key=os.environ["EMERGENT_LLM_KEY"],
+        session_id=f"pdf-extract-{_uuid.uuid4().hex[:8]}",
+        system_message=system,
+    ).with_model("anthropic", "claude-sonnet-4-6")
+    resp = await chat.send_message(UserMessage(
+        text=f"Extraia os dados deste documento. Responda SOMENTE com JSON neste formato exato:\n{json.dumps(schema, ensure_ascii=False)}\n\nDOCUMENTO:\n{texto[:12000]}"))
+    raw = (resp or "").strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    try:
+        return json.loads(raw.strip())
+    except Exception:
+        logger.error(f"Falha ao parsear extração de PDF: {raw[:300]}")
+        return {}
+
+
 def classify_message(text: str) -> tuple:
     """Motor de decisão do RAVI: VERDE (responde), AMARELO (responde + acompanha), VERMELHO (humano)."""
     t = (text or "").lower()

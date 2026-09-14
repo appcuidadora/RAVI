@@ -1,0 +1,44 @@
+{
+  "summary": "RAVI Fase 2 (Clientes + Processos + Import PDF inteligente) end-to-end validated. Backend: 15/15 new phase2 tests pass, including CPF/notes create+edit, archive/reactivate toggle with default hide, client detail (processes+conversations), multi-tenant isolation on GET /clients/{id} + imported process (other office receives 404 and does not list it), PDF import normal (CNJ 1009876-55.2026.8.26.0100, 3 partes tipadas, 4 movimentações, documento salvo), PDF restrito (restricted=true, acesso_restrito=true, status 'Restrito (segredo de justiça)', 0 partes, nao_identificados populado), rejeição de não-PDF (400) e PDF sem texto (400). Regressão pytest -n0 completa: 84 passed, 9 failed (todos pré-existentes de webhook Meta signature — env, fora do escopo Fase 2), 7 skipped. Frontend: login, /clientes (create com CPF, busca, toggle arquivados, abertura de detalhe com os 3 cards client-info-card/client-processes-card/client-history-card), /processos (import-pdf-btn → dialog → import-file-input → import-submit-btn → import-result para PDF normal, import-restricted-warning + import-not-identified para PDF restrito) — todos os data-testids solicitados presentes e funcionais.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/processes/import-pdf", "issue": "Campo 'tribunal' devolve o nome longo do Claude ('Tribunal de Justiça do Estado de São Paulo') e sobrescreve o parse CNJ que devolveria 'TJSP'. O spec pede 'TJSP'. Sugestão: preferir o parseado do CNJ (parse_cnj) e usar o extraído do LLM só quando o CNJ não for reconhecido — ou normalizar via mapa de tribunais."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Todos os Dialogs (client-dialog, import-dialog)", "issues": ["Radix a11y warning repetido: 'Missing Description or aria-describedby for DialogContent'. Adicionar <DialogDescription> em todos os DialogHeader."]},
+      {"screen": "Dashboard chart", "issues": ["Warning do Recharts: width(-1) height(-1) — container sem dimensões mínimas em algum breakpoint (não bloqueia)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase2.py",
+    "/app/test_reports/pytest/phase2.xml",
+    "/app/test_reports/pytest/full.xml"
+  ],
+  "action_items": [
+    "(Minor) Preferir 'TJSP' (do parse_cnj) sobre o nome longo devolvido pelo LLM no campo tribunal/court do import-pdf.",
+    "(Minor) Adicionar <DialogDescription> aos dialogs client-dialog e import-dialog para resolver o warning Radix.",
+    "As 9 falhas em test_audio_webhook.py e test_webhook_meta.py são 403 'Assinatura inválida' — sem META_APP_SECRET configurado no .env de teste. NÃO é regressão da Fase 2; herdado de iterações anteriores."
+  ],
+  "critical_code_review_comments": [
+    "core_routes.import_process_pdf: extracted.get('tribunal') tem precedência sobre parse CNJ — inverta a ordem para pegar sigla curta primeiro.",
+    "core_routes.import_process_pdf salva texto[:8000] em documentos[].texto no MongoDB — bom, evita duplicação com storage; documentos[].texto é filtrado no GET (linha 265-266). Ok.",
+    "ai.extract_process_from_pdf trunca em 12000 chars — para PDFs longos pode perder partes finais; considerar chunking futuramente.",
+    "storage.put_object é chamado após a chamada async ao Claude; em caso de falha do put_object o processo/documento vira 500 depois de já gastar tokens LLM. Considerar salvar o PDF ANTES do LLM call.",
+    "Frontend ProcessoDetalhe: partes render suporta objeto {tipo,nome} e string (retrocompat) — bem feito."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase2.py (novo — 15 testes)"
+  ],
+  "success_rate": {"backend": "100% Fase 2 (15/15); regressão global 84/93 (91%) com 9 falhas ambientais Meta", "frontend": "100% dos data-testids Fase 2 verificados"},
+  "test_credentials": "construcaovilanova@gmail.com / Ravi@2026",
+  "seed_data_creation": "Criados via testes: clientes TEST_* (auto-cleanup), processo importado do PDF normal (permanece no escritório Silva para inspeção UI), processo importado restrito, escritório secundário TEST_Office_* para isolamento.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Fase 2 (Clientes + Processos + Import PDF) validada em backend e frontend. Fixtures PDF em /app/tests/fixtures/. Extração via Claude leva ~10-15s — usar wait_for_selector com timeout>=30s para import-result. Tribunal do LLM vem como nome longo (não sigla) — teste aceita ambos ('TJSP' OR 'São Paulo'). Falhas Meta webhook (403 Assinatura inválida) são ambientais desde iteration_7+.",
+  "rca of the issue": "N/A — nenhum bug funcional bloqueante encontrado. Um único ponto de melhoria menor: canonização do nome do tribunal usando parse CNJ."
+}

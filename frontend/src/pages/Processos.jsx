@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, apiError } from "@/lib/api";
 import { toast } from "sonner";
-import { Plus, ChevronRight, Lock } from "lucide-react";
+import { Plus, ChevronRight, Lock, FileUp, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const EMPTY = { number: "", client_id: "", status: "Em andamento", ultima_movimentacao: "", valor_causa: "", forma_pagamento: "" };
@@ -21,6 +21,28 @@ export default function Processos() {
   const [cobrancas, setCobrancas] = useState([]);
   const [pdfFile, setPdfFile] = useState(null);
   const fileRef = useRef(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const importRef = useRef(null);
+
+  const importPdf = async () => {
+    if (!importFile) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", importFile);
+      const { data } = await api.post("/processes/import-pdf", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      setImportResult(data);
+      load();
+    } catch (err) {
+      toast.error(apiError(err, "Não foi possível importar este PDF"));
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const load = () => api.get("/processes").then((r) => setProcesses(r.data)).catch(() => {});
   useEffect(() => {
@@ -79,10 +101,16 @@ export default function Processos() {
           <h1 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight text-zinc-100">Processos</h1>
           <p className="text-sm text-zinc-500 mt-1">Informe o número. O Ravi identifica tribunal e segmento automaticamente.</p>
         </div>
-        <Button onClick={() => { setForm(EMPTY); setNewClient({ name: "", phone: "" }); setCobrancas([]); setPdfFile(null); setOpen(true); }}
-          data-testid="add-process-btn" className="brand-gradient brand-gradient-hover text-white border-0">
-          <Plus size={16} className="mr-1.5" /> Novo processo
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => { setImportOpen(true); setImportFile(null); setImportResult(null); }}
+            data-testid="import-pdf-btn" className="border-[#3F476C] text-zinc-300">
+            <FileUp size={16} className="mr-1.5" /> Importar PDF
+          </Button>
+          <Button onClick={() => { setForm(EMPTY); setNewClient({ name: "", phone: "" }); setCobrancas([]); setPdfFile(null); setOpen(true); }}
+            data-testid="add-process-btn" className="brand-gradient brand-gradient-hover text-white border-0">
+            <Plus size={16} className="mr-1.5" /> Novo processo
+          </Button>
+        </div>
       </div>
 
       <Input placeholder="Buscar por número CNJ ou cliente…" value={search} onChange={(e) => setSearch(e.target.value)}
@@ -129,11 +157,12 @@ export default function Processos() {
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="bg-[#0F111A] border-[#23283E]" data-testid="process-dialog">
+        <DialogContent className="bg-[#0F111A] border-[#23283E] max-h-[90vh] flex flex-col" data-testid="process-dialog">
           <DialogHeader>
             <DialogTitle className="font-display text-zinc-100">Novo processo</DialogTitle>
+            <DialogDescription className="text-zinc-500 text-xs">Informe o número CNJ. O Ravi identifica tribunal e segmento automaticamente.</DialogDescription>
           </DialogHeader>
-          <form onSubmit={save} className="space-y-4">
+          <form id="process-form" onSubmit={save} className="space-y-4 overflow-y-auto pr-1 flex-1 min-h-0">
             <div className="space-y-1.5">
               <Label className="text-zinc-400 text-xs">Número do processo (CNJ)</Label>
               <Input required value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })}
@@ -232,10 +261,67 @@ export default function Processos() {
                 ))}
               </div>
             </div>
-            <Button type="submit" data-testid="process-save-btn" className="w-full brand-gradient brand-gradient-hover text-white border-0">
+          </form>
+          <div className="pt-3 border-t border-[#23283E] shrink-0">
+            <Button type="submit" form="process-form" data-testid="process-save-btn"
+              className="w-full brand-gradient brand-gradient-hover text-white border-0">
               Cadastrar processo
             </Button>
-          </form>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="bg-[#0F111A] border-[#23283E]" data-testid="import-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-display text-zinc-100">Importar processo de PDF</DialogTitle>
+            <DialogDescription className="text-zinc-500 text-xs">A IA identifica número, partes, tribunal e movimentações do documento.</DialogDescription>
+          </DialogHeader>
+          {!importResult ? (
+            <div className="space-y-4">
+              <p className="text-xs text-zinc-500 leading-relaxed">
+                O Ravi lê o documento e identifica automaticamente: número CNJ, tribunal, partes, assunto,
+                movimentações e situação. O que não estiver no documento será informado como "não identificado" — nada é inventado.
+              </p>
+              <button type="button" onClick={() => importRef.current?.click()} data-testid="import-file-btn"
+                className="w-full rounded-lg border border-dashed border-[#3F476C] bg-[#090A0F] px-3 py-6 text-center text-xs text-zinc-400 hover:border-indigo-500/50 hover:text-zinc-200 transition-colors duration-150">
+                {importFile ? `📄 ${importFile.name}` : "Selecionar PDF do processo"}
+              </button>
+              <input ref={importRef} type="file" accept="application/pdf" className="hidden"
+                onChange={(e) => setImportFile(e.target.files?.[0] || null)} data-testid="import-file-input" />
+              <Button onClick={importPdf} disabled={!importFile || importing} data-testid="import-submit-btn"
+                className="w-full brand-gradient brand-gradient-hover text-white border-0">
+                {importing ? <><Loader2 size={15} className="mr-2 animate-spin" /> Lendo documento…</> : "Importar e identificar"}
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4" data-testid="import-result">
+              {importResult.restricted && (
+                <p className="text-xs text-amber-300 bg-amber-950/40 border border-amber-700/40 rounded-lg px-3 py-2.5" data-testid="import-restricted-warning">
+                  Este processo possui acesso restrito (segredo de justiça). O Ravi não tenta contornar restrições — apenas o conteúdo deste documento autorizado foi usado.
+                </p>
+              )}
+              <div className="text-xs space-y-1.5">
+                <p className="text-zinc-400">Número: <span className="font-mono-code text-indigo-300">{importResult.process.numero_formatado || importResult.process.number}</span></p>
+                {importResult.process.tribunal && <p className="text-zinc-400">Tribunal: <span className="text-zinc-200">{importResult.process.tribunal}</span></p>}
+                {importResult.process.subject && <p className="text-zinc-400">Assunto: <span className="text-zinc-200">{importResult.process.subject}</span></p>}
+                <p className="text-zinc-400">Partes: <span className="text-zinc-200">{(importResult.process.partes || []).length} identificada(s)</span></p>
+                <p className="text-zinc-400">Movimentações: <span className="text-zinc-200">{(importResult.process.movimentacoes || []).length} extraída(s)</span></p>
+              </div>
+              {importResult.nao_identificados.length > 0 && (
+                <p className="text-[11px] text-zinc-500" data-testid="import-not-identified">
+                  Não identificado no documento: {importResult.nao_identificados.join(", ")}.
+                </p>
+              )}
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => { setImportOpen(false); setImportResult(null); }}
+                  data-testid="import-close-btn" className="border-[#3F476C] text-zinc-300 flex-1">Fechar</Button>
+                <a href={`/processos/${importResult.process.id}`} className="flex-1" data-testid="import-open-process">
+                  <Button className="w-full brand-gradient brand-gradient-hover text-white border-0">Ver processo</Button>
+                </a>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

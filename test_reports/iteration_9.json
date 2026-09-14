@@ -1,0 +1,25 @@
+{
+  "summary": "Frontend-only regression test for the 'Cadastrar processo' button visibility bug fix on /processos Novo Processo dialog. All acceptance criteria pass on both desktop (1920x800) and mobile (390x844). The submit via form= attribute correctly creates a process end-to-end.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Novo processo dialog", "issues": ["A11y warning in console: 'Missing Description or aria-describedby for DialogContent' — non-blocking but should add DialogDescription for accessibility."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Add <DialogDescription> to Novo processo dialog to satisfy Radix a11y warning.",
+    "The client Select first option is '+ Cadastrar novo cliente' which triggers inline required fields; if user opens the dropdown by accident they hit HTML5 'Please fill out this field' popup. Consider moving the inline creation to a distinct affordance or making the inline fields non-required until user starts typing there."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped)", "frontend": "100%"},
+  "test_credentials": "construcaovilanova@gmail.com / Ravi@2026",
+  "seed_data_creation": "Created 1 real process (CNJ 2009418876-11.2026.8.26.0100) tied to client 'Fagner dos Santos' via UI as part of regression flow.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Bug 'save button off-screen in Novo processo dialog' is verified fixed. DialogContent uses max-h-[90vh] flex flex-col; form has overflow-y-auto flex-1 min-h-0; submit button lives outside form in a fixed footer with border-t and submits via form='process-form' attribute — this works and creates the process (POST /api/processes → 200).",
+  "rca of the issue": "Original: growing dialog contents (CNJ, inline client creation, PDF upload, situação, financial section w/ cobranças) pushed the submit button below the viewport with no scroll on DialogContent. Fix moved the submit outside the form/scroll area into a sticky footer, form submits via HTML form= attribute. Verified visible at y=643.5/800 (desktop) and y=673.5/844 (mobile)."
+}

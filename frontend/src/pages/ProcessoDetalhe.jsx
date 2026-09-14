@@ -77,6 +77,9 @@ export default function ProcessoDetalhe() {
         <h1 className="font-display text-xl sm:text-2xl font-semibold tracking-tight text-zinc-100 font-mono-code" data-testid="process-number">
           {proc.numero_formatado || proc.number}
         </h1>
+        {(proc.title || proc.subject) && (
+          <p className="text-sm text-zinc-400 mt-2" data-testid="process-title">{proc.title || proc.subject}</p>
+        )}
         <div className="flex flex-wrap gap-2 mt-3">
           {proc.tribunal && <Badge variant="outline" className="border-[#3F476C] text-indigo-300">{proc.tribunal}</Badge>}
           {proc.segmento && <Badge variant="outline" className="border-[#3F476C] text-zinc-400">{proc.segmento}</Badge>}
@@ -206,11 +209,17 @@ export default function ProcessoDetalhe() {
           {(proc.partes || []).length > 0 && (
             <div className="rounded-xl border border-[#23283E] bg-[#0F111A] p-5" data-testid="process-partes-card">
               <h4 className="font-mono-code text-[10px] uppercase tracking-widest text-zinc-500 mb-3">Partes</h4>
-              {proc.partes.map((p, i) => (
-                <p key={i} className="text-xs text-zinc-300 flex items-center gap-2 py-1">
-                  <FileText size={11} className="text-zinc-600" /> {p}
-                </p>
-              ))}
+              {proc.partes.map((p, i) => {
+                const isObj = typeof p === "object" && p !== null;
+                const nome = isObj ? p.nome : p;
+                const tipo = isObj ? ({ cliente: "Cliente", parte_contraria: "Parte contrária", advogado: "Advogado", outro: "Participante" }[p.tipo] || p.tipo) : null;
+                return (
+                  <p key={i} className="text-xs text-zinc-300 flex items-center gap-2 py-1">
+                    <FileText size={11} className="text-zinc-600 shrink-0" />
+                    <span>{nome}{tipo && <span className="text-zinc-600"> — {tipo}</span>}</span>
+                  </p>
+                );
+              })}
             </div>
           )}
         </div>

@@ -14,6 +14,7 @@ import Conversas from "@/pages/Conversas";
 import Processos from "@/pages/Processos";
 import ProcessoDetalhe from "@/pages/ProcessoDetalhe";
 import Clientes from "@/pages/Clientes";
+import ClienteDetalhe from "@/pages/ClienteDetalhe";
 import Alertas from "@/pages/Alertas";
 import Equipe from "@/pages/Equipe";
 import Configuracoes from "@/pages/Configuracoes";
@@ -70,6 +71,7 @@ function AppRoutes() {
         <Route path="/processos" element={<RequirePerm module="processos"><Processos /></RequirePerm>} />
         <Route path="/processos/:id" element={<RequirePerm module="processos"><ProcessoDetalhe /></RequirePerm>} />
         <Route path="/clientes" element={<RequirePerm module="clientes"><Clientes /></RequirePerm>} />
+        <Route path="/clientes/:id" element={<RequirePerm module="clientes"><ClienteDetalhe /></RequirePerm>} />
         <Route path="/alertas" element={<RequirePerm module="alertas"><Alertas /></RequirePerm>} />
         <Route path="/equipe" element={<RequirePerm module="equipe"><Equipe /></RequirePerm>} />
         <Route path="/configuracoes" element={<RequirePerm module="configuracoes"><Configuracoes /></RequirePerm>} />

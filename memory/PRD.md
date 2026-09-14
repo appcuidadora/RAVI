@@ -29,6 +29,13 @@ SOCIO_ADMIN (total), ADVOGADO_ASSOCIADO, ESTAGIARIO, SECRETARIA_ATENDIMENTO — 
 - Admin: construcaovilanova@gmail.com / Ravi@2026 (Dr. Carlos Mendes, Silva Advocacia)
 - Demo seed: cliente Carlos Eduardo, processo 1001234-56.2025.8.26.0100 (TJSP), conversa demo, alerta vermelho, KPIs 50/63/41/3/3h42
 
+## FASE 2 — Clientes e Processos (10/09/2026)
+- Clientes: cpf, notes, updated_at, arquivar/reativar (oculto por padrão), detalhe /clientes/:id (dados + processos + histórico de conversas), busca
+- Processos: title/subject/court/unit/restricted/last_movement_at; partes estruturadas {tipo: cliente|parte_contraria|advogado|outro, nome}
+- Importação inteligente de PDF: POST /api/processes/import-pdf → pypdf + regex CNJ + Claude (JSON estruturado, nunca inventa; campos ausentes em nao_identificados); segredo de justiça → restricted=true sem contornar; documento no object storage com office_id
+- Testes validados via curl: PDF normal extraiu número/tribunal/assunto/3 partes/4 movimentações/última mov; PDF restrito detectado corretamente com campos explicitamente não identificados
+- Fixtures: /app/tests/fixtures/ravi_processo_teste_01.pdf e ravi_processo_teste_02_restrito.pdf (gerados; os do usuário não foram anexados)
+
 ## RAVI ADMIN (entrega 10/09/2026)
 - Dois ambientes: RAVI APP (escritórios) × RAVI ADMIN (/admin, SUPER_ADMIN seed, cookie próprio admin_access_token, roles futuras preparadas)
 - Dashboard admin: 20 KPIs reais + bloco ⚠️ Atenção (tokens expirados, cobranças vencidas, uso de limite, suspensos)
