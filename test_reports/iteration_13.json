@@ -1,0 +1,45 @@
+{
+  "summary": "RAVI Fase 5 (CRUD /admin/users com roles + require_super_admin + senha temp exibida uma vez + toggle-active + auto-desativação bloqueada; logs admin com filtro from_date/to_date combinando tipo e office_id) validada backend + frontend. Novo arquivo /app/backend/tests/test_phase5_admin_users.py com 21 testes cobrindo segurança (401 sem auth, 401 com cookie de app tenant, 401 em /admin/dashboard para app user), CRUD (list sem password_hash, create com role inválida→400, create ok retorna temp_password começando com 'RaviAdmin-', temp_password NÃO aparece em GET subsequente, email duplicado→400, login do novo admin funciona em /admin/auth/login, novo admin não-SUPER→GET /users→403 e POST→403, toggle desativa→login desativado→403, toggle reativa→login OK, auto-desativação SUPER→400), logs (sem datas retorna tudo, range futuro retorna [], today range inclui admin_login recente, tipo=admin/tenant filtra origem), regressão (dashboard, offices, impersonate). TODOS 21/21 PASSING. Regressão global pytest -n0 backend/tests/: 142 passed, 7 skipped, 0 failed (as 2 falhas de state pollution de iterações anteriores agora passam — provável que o próprio código foi ajustado ou o timing mudou). Frontend testado com Playwright: /admin/usuarios renderiza tabela+dialog, Select de perfil funcional, painel de senha temporária mostra 'RaviAdmin-xxx', criação persiste linha, toggle ativa/desativa reflete Badge (ativo↔desativado), refresh preserva /admin/usuarios, nav admin-nav-usuarios funciona, /admin/logs carrega com botões de tipo (Todos/Administrativos/Escritórios), dropdown de escritórios e 2 date pickers (from/to). Todos os eventos gerados aparecem imediatamente (admin_user_created, admin_user_toggled x2).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/admin/users/{id}", "issue": "Endpoint aceita 'name' e 'role' mas não expõe UI para editar 'name' — só role é editável no frontend. Não é bug, só observação de cobertura."},
+      {"endpoint": "GET /api/admin/logs", "issue": "from_date/to_date são comparados como strings ISO ('2026-01-15' vs '2026-01-15T21:47:00...'). Funciona porque created_at é armazenado como ISO string lexicograficamente ordenável, mas depende dessa convenção — se algum dia created_at virar Date do BSON, a comparação quebra silenciosamente. Documentar/testar."},
+      {"endpoint": "POST /api/admin/users", "issue": "Validação de email é apenas .lower().strip() — não valida formato. `data.email='abc'` é aceito e persistido. Considerar EmailStr do pydantic."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/admin/logs", "issues": ["Date pickers usam <input type='date'> nativo do browser (mm/dd/yyyy US format) em vez do Calendar do shadcn — inconsistente com o resto do app dark theme e confuso para usuário pt-BR (esperaria dd/mm/yyyy). Trocar por Popover+Calendar."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase5_admin_users.py",
+    "/app/test_reports/pytest/phase5.xml",
+    "/app/test_reports/pytest/full.xml"
+  ],
+  "action_items": [
+    "(opcional) Trocar <input type='date'> em /admin/logs por Popover+Calendar shadcn para consistência visual e formato pt-BR",
+    "(opcional) Validar formato de email em POST /api/admin/users com pydantic EmailStr",
+    "(observação) PATCH /api/admin/users/{id} aceita 'name' mas UI não expõe edição — considerar adicionar botão editar ou remover 'name' do PATCH schema"
+  ],
+  "critical_code_review_comments": [
+    "require_super_admin bem isolado: apenas /users* usam. Bom.",
+    "temp_password gerada com secrets.token_urlsafe(6) → ~8 chars base64url — 48 bits de entropia, suficiente para one-time. OK.",
+    "toggle-active auto-guarda self (linha 591-592) — correto.",
+    "list_admin_users projeta {'_id':0,'password_hash':0} — sem vazamento de hash. Bom.",
+    "Logs date filter: q['created_at']={'$gte':from,'$lte':to+'T23:59:59'} — depende de created_at ser ISO string; se algum dia mudar para datetime BSON, filter silenciosamente retorna vazio. Adicionar teste de integração ou converter para datetime consistentemente."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase5_admin_users.py (novo — 21 testes)"
+  ],
+  "success_rate": {"backend": "100% Fase 5 (21/21); regressão global 142/149 passed, 7 skipped, 0 failed (100% dos executados)", "frontend": "100% dos fluxos críticos testados (login admin → nav usuarios → criar → temp pwd → toggle off → toggle on → logs page)"},
+  "test_credentials": "SUPER_ADMIN: construcaovilanova@gmail.com / Ravi@2026 (em /admin/login e /login)",
+  "seed_data_creation": "Cada execução do test_phase5_admin_users cria 1 admin de teste com email test_admin_<uuid>@ravi.app e role ADMIN_SUPORTE (ativo ao final). Fica em db.admin_users. Além disso, o teste frontend também criou 1 admin testfe_<ts>@ravi.app (ADMIN_SUPORTE, ativo). Main agent pode limpar via db.admin_users.deleteMany({email:/^test_admin_|^testfe_/}) se quiser. Iteração anterior deixou 'ana.suporte@ravi.app' — segue presente e inativo.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Fase 5 test file em /app/backend/tests/test_phase5_admin_users.py. Todos os 21 testes passam isoladamente e em suíte completa. Regressão global agora estável (142/149, sem falhas — as 2 falhas flaky reportadas na iter12 não apareceram nesta run). Se main agent adicionar edição de 'name' no frontend, teste correspondente pode ser adicionado. As date pickers de /admin/logs são <input type='date'> nativos — se forem trocados por Calendar shadcn, testes E2E precisam usar seletor diferente. Cookie admin: 'admin_access_token' (JWT type='admin'), 8h. Cookie tenant: 'access_token'. São completamente independentes.",
+  "rca of the issue": "N/A — todos os requisitos da Fase 5 funcionam conforme especificação. Único ponto de UX menor é o date picker nativo em /admin/logs."
+}

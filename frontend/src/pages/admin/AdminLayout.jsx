@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import RaviLogo from "@/components/RaviLogo";
 import {
   LayoutDashboard, Building2, Layers, Banknote, PhoneCall,
-  LifeBuoy, BarChart3, ScrollText, SlidersHorizontal, LogOut, Menu,
+  LifeBuoy, BarChart3, ScrollText, SlidersHorizontal, LogOut, Menu, UserCog,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 const NAV = [
   { label: "Dashboard", icon: LayoutDashboard, path: "/admin", end: true, tid: "admin-nav-dashboard" },
   { label: "Escritórios", icon: Building2, path: "/admin/escritorios", tid: "admin-nav-escritorios" },
+  { label: "Usuários Admin", icon: UserCog, path: "/admin/usuarios", tid: "admin-nav-usuarios" },
   { label: "Planos", icon: Layers, path: "/admin/planos", tid: "admin-nav-planos" },
   { label: "Financeiro", icon: Banknote, path: "/admin/financeiro", tid: "admin-nav-financeiro" },
   { label: "WhatsApp / Meta", icon: PhoneCall, path: "/admin/whatsapp", tid: "admin-nav-whatsapp" },

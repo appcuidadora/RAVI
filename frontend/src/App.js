@@ -23,6 +23,7 @@ import AdminLogin from "@/pages/admin/AdminLogin";
 import AdminLayout from "@/pages/admin/AdminLayout";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 import AdminEscritorios from "@/pages/admin/AdminEscritorios";
+import AdminUsuarios from "@/pages/admin/AdminUsuarios";
 import AdminPlanos from "@/pages/admin/AdminPlanos";
 import AdminFinanceiro from "@/pages/admin/AdminFinanceiro";
 import AdminWhatsApp from "@/pages/admin/AdminWhatsApp";
@@ -81,6 +82,7 @@ function AppRoutes() {
       <Route path="/admin" element={<AdminLayout />}>
         <Route index element={<AdminDashboard />} />
         <Route path="escritorios" element={<AdminEscritorios />} />
+        <Route path="usuarios" element={<AdminUsuarios />} />
         <Route path="planos" element={<AdminPlanos />} />
         <Route path="financeiro" element={<AdminFinanceiro />} />
         <Route path="whatsapp" element={<AdminWhatsApp />} />

@@ -5,10 +5,13 @@ export default function AdminLogs() {
   const [data, setData] = useState({ logs: [], offices: [] });
   const [tipo, setTipo] = useState("all");
   const [officeId, setOfficeId] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
 
   useEffect(() => {
-    api.get(`/admin/logs?tipo=${tipo}&office_id=${officeId}`).then((r) => setData(r.data)).catch(() => {});
-  }, [tipo, officeId]);
+    api.get(`/admin/logs?tipo=${tipo}&office_id=${officeId}&from_date=${fromDate}&to_date=${toDate}`)
+      .then((r) => setData(r.data)).catch(() => {});
+  }, [tipo, officeId, fromDate, toDate]);
 
   const officeName = (id) => data.offices.find((o) => o.id === id)?.name || id || "—";
 
@@ -31,6 +34,10 @@ export default function AdminLogs() {
           <option value="">Todos os escritórios</option>
           {data.offices.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
+        <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} data-testid="logs-from-date"
+          className="rounded-full border border-[#23283E] bg-[#090A0F] text-xs text-zinc-300 px-3 py-1.5" />
+        <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} data-testid="logs-to-date"
+          className="rounded-full border border-[#23283E] bg-[#090A0F] text-xs text-zinc-300 px-3 py-1.5" />
       </div>
 
       <div className="rounded-xl border border-[#23283E] bg-[#0F111A] p-2 fade-up max-h-[65vh] overflow-y-auto" data-testid="logs-list">

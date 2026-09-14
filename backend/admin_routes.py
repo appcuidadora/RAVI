@@ -5,7 +5,7 @@ import jwt
 import httpx
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Request, Response, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from typing import Optional
 from database import db
 from security import hash_password, verify_password, get_jwt_secret
@@ -525,14 +525,96 @@ async def health_check(admin: dict = Depends(get_current_admin)):
     return {"checks": checks, "verificado_em": now_iso()}
 
 
+# ---------- USUÁRIOS ADMINISTRATIVOS ----------
+
+async def require_super_admin(admin: dict = Depends(get_current_admin)) -> dict:
+    if admin["role"] != "SUPER_ADMIN":
+        raise HTTPException(403, "Apenas SUPER_ADMIN pode gerenciar administradores")
+    return admin
+
+
+@router.get("/users")
+async def list_admin_users(admin: dict = Depends(require_super_admin)):
+    users = await db.admin_users.find({}, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(100)
+    return {"users": users, "roles": ADMIN_ROLES}
+
+
+class AdminUserIn(BaseModel):
+    name: str
+    email: EmailStr
+    role: str
+
+
+@router.post("/users")
+async def create_admin_user(data: AdminUserIn, admin: dict = Depends(require_super_admin)):
+    import secrets as _secrets
+    email = data.email.lower().strip()
+    if data.role not in ADMIN_ROLES:
+        raise HTTPException(400, "Perfil inválido")
+    if not data.name.strip():
+        raise HTTPException(400, "Informe o nome")
+    if await db.admin_users.find_one({"email": email}):
+        raise HTTPException(400, "Este e-mail já está cadastrado")
+    temp_password = "RaviAdmin-" + _secrets.token_urlsafe(6)
+    user = {"id": uuid.uuid4().hex, "name": data.name.strip(), "email": email,
+            "password_hash": hash_password(temp_password), "role": data.role,
+            "active": True, "totp_secret": None, "created_at": now_iso()}
+    await db.admin_users.insert_one(user)
+    await admin_log(admin, "admin_user_created", admin_email=email, role=data.role)
+    user.pop("_id", None)
+    user.pop("password_hash", None)
+    user["temp_password"] = temp_password
+    return user
+
+
+class AdminUserPatch(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+
+
+@router.patch("/users/{user_id}")
+async def update_admin_user(user_id: str, data: AdminUserPatch, admin: dict = Depends(require_super_admin)):
+    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    if "role" in updates and updates["role"] not in ADMIN_ROLES:
+        raise HTTPException(400, "Perfil inválido")
+    if not updates:
+        raise HTTPException(400, "Nada para atualizar")
+    res = await db.admin_users.update_one({"id": user_id}, {"$set": updates})
+    if not res.matched_count:
+        raise HTTPException(404, "Administrador não encontrado")
+    await admin_log(admin, "admin_user_updated", target=user_id, **updates)
+    return {"ok": True}
+
+
+@router.post("/users/{user_id}/toggle-active")
+async def toggle_admin_user(user_id: str, admin: dict = Depends(require_super_admin)):
+    if user_id == admin["id"]:
+        raise HTTPException(400, "Você não pode desativar a si mesmo")
+    target = await db.admin_users.find_one({"id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(404, "Administrador não encontrado")
+    new_state = not target.get("active", True)
+    await db.admin_users.update_one({"id": user_id}, {"$set": {"active": new_state}})
+    await admin_log(admin, "admin_user_toggled", target=target["email"], active=new_state)
+    return {"ok": True, "active": new_state}
+
+
 # ---------- LOGS ----------
 
 @router.get("/logs")
-async def list_logs(tipo: str = "all", office_id: str = "", admin: dict = Depends(get_current_admin)):
+async def list_logs(tipo: str = "all", office_id: str = "", from_date: str = "", to_date: str = "",
+                    admin: dict = Depends(get_current_admin)):
     out = []
+    date_q = {}
+    if from_date:
+        date_q["$gte"] = from_date
+    if to_date:
+        date_q["$lte"] = to_date + "T23:59:59"
     q = {}
     if office_id:
         q["office_id"] = office_id
+    if date_q:
+        q["created_at"] = date_q
     if tipo in ("all", "tenant"):
         async for l in db.audit_logs.find(q, {"_id": 0}).sort("created_at", -1).limit(120):
             l["origem"] = "tenant"
@@ -541,6 +623,8 @@ async def list_logs(tipo: str = "all", office_id: str = "", admin: dict = Depend
         q2 = {}
         if office_id:
             q2["office_id"] = office_id
+        if date_q:
+            q2["created_at"] = date_q
         async for l in db.admin_logs.find(q2, {"_id": 0}).sort("created_at", -1).limit(120):
             l["origem"] = "admin"
             out.append(l)
