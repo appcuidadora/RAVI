@@ -29,6 +29,13 @@ SOCIO_ADMIN (total), ADVOGADO_ASSOCIADO, ESTAGIARIO, SECRETARIA_ATENDIMENTO — 
 - Admin: construcaovilanova@gmail.com / Ravi@2026 (Dr. Carlos Mendes, Silva Advocacia)
 - Demo seed: cliente Carlos Eduardo, processo 1001234-56.2025.8.26.0100 (TJSP), conversa demo, alerta vermelho, KPIs 50/63/41/3/3h42
 
+## FASE 3 — Conversas e Inteligência (10/09/2026)
+- Máquina de estados formal: OPEN/AI_HANDLING/WAITING_HUMAN/RESOLVED/PAUSED (RED → WAITING_HUMAN; takeover → WAITING_HUMAN; pause → PAUSED; resume → AI_HANDLING; resolve → RESOLVED)
+- Mensagens SYSTEM na timeline (pause/assume/retoma/resolve) com render próprio centralizado
+- RED_SIGNALS + pedido explícito de humano ("quero falar com o advogado") escala automaticamente
+- POST /conversations/{id}/resolve fecha alertas abertos e registra alerta tipo "resolved"
+- conversation.updated_at em toda mensagem; badge de estado na UI; botão Resolver
+
 ## FASE 2 — Clientes e Processos (10/09/2026)
 - Clientes: cpf, notes, updated_at, arquivar/reativar (oculto por padrão), detalhe /clientes/:id (dados + processos + histórico de conversas), busca
 - Processos: title/subject/court/unit/restricted/last_movement_at; partes estruturadas {tipo: cliente|parte_contraria|advogado|outro, nome}

@@ -1,0 +1,45 @@
+{
+  "summary": "RAVI Fase 3 (Conversas + Máquina de estados + System messages + Escalação explícita) validada end-to-end. Backend: 9/9 novos testes em test_phase3.py passam (green→AI_HANDLING mantido; 'quero falar com o advogado' → red + WAITING_HUMAN + alerta intervention criado; 'dá para fazer um acordo?' → red; pause cria system message 'pausado' e bloqueia IA (action=human_in_control); takeover grava system 'Dr(a). ... assumiu'; resume volta a AI_HANDLING com system 'retomou'; resolve marca RESOLVED, fecha alertas abertos da conversa, cria alerta tipo 'resolved'; updated_at muda em cada mensagem; isolamento multi-tenant: outro escritório recebe 404 em GET e não afeta ações). Regressão pytest -n0 completa: 102 passed, 7 skipped, 0 failed (as 9 falhas históricas de webhook Meta assinatura foram corrigidas/skipadas em iterações anteriores; regressão limpa). Frontend /conversas: state badge 'Ravi atendendo' visível ao lado do badge de risco 'Ravi cuidando'; botão 'Resolver' presente com data-testid=resolve-conversation-btn; botões 'Pausar Ravi' e 'Assumir conversa' funcionais; 12 mensagens system renderizadas centralizadas em itálico com pill 'Ravi pausado/retomou/etc'; respostas escalonadas (Ravi • escalonado) mostradas para pedidos explícitos de humano e acordo.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/conversations/{id}/pause-ravi | takeover | resume-ravi | resolve", "issue": "Ações não verificam existência da conversa antes do update — usam update_one com office_filter. Isolamento funciona (nada acontece em conversa de outro escritório), mas retornam 200 mesmo quando conv_id não existe. Sugestão: verificar matched_count e devolver 404 explicitamente para melhor DX de API."},
+      {"endpoint": "GET /api/conversations/{id}", "issue": "Limite hard de .to_list(200) em messages — conversas longas (>200 msgs) truncam histórico exibido no UI e afetam contadores. Considerar paginação ou usar sort desc + limit + reverse."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Conversas — badges no topo", "issues": ["Badge de estado usa cor cinza uniforme (bg-[#161925]/border-[#3F476C]) para todos os estados. Diferenciação visual seria útil: WAITING_HUMAN em âmbar, RESOLVED em verde, PAUSED em cinza, AI_HANDLING em azul."]},
+      {"screen": "Dashboard", "issues": ["Warning Recharts 'width(-1) height(-1)' persiste desde iteração 10 — não bloqueia mas indica container sem dimensão mínima em algum breakpoint."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase3.py",
+    "/app/test_reports/pytest/phase3.xml",
+    "/app/test_reports/pytest/full.xml"
+  ],
+  "action_items": [
+    "(Minor) Devolver 404 explícito em pause/takeover/resume/resolve quando matched_count=0 (hoje respondem 200 mesmo para conv_id inexistente).",
+    "(Minor UX) Colorir o state badge por estado (âmbar para WAITING_HUMAN, verde para RESOLVED, cinza para PAUSED) — hoje é neutro para todos.",
+    "(Minor) Paginar mensagens em GET /conversations/{id} (limit 200 pode truncar histórico longo)."
+  ],
+  "critical_code_review_comments": [
+    "pipeline.handle_inbound_message: quando conv é criada nova, `state='AI_HANDLING'` é setado no insert — bom. Porém quando cliente=None (unidentified), o state permanece AI_HANDLING sem que a IA vá responder (retorno 'awaiting_client_link'). Considerar setar state='WAITING_HUMAN' para conversas unidentified, deixando a UI e a lógica coerentes.",
+    "core_routes.pause/takeover/resume/resolve: nenhum faz find_one antes do update — impossível diferenciar 'sucesso' de 'conv não existe' no client. Isolamento funciona mas retorna 200 falso-positivo. Bug latente para clients terceiros.",
+    "pipeline.save_message: system messages entram na msg com sender='system' mas o campo risk_level fica None — ok para UI, mas GET /conversations retorna last_message_text='Conversa marcada como resolvida por X' na lista, poluindo prévia. Considerar não atualizar last_message_text para sender=system.",
+    "ai.RED_SIGNALS: lista tem overlap ('quero falar', 'falar com humano', 'atendente' etc.) — funciona mas match é O(n*m); para escala considerar regex compilado ou set de tokens.",
+    "Frontend Conversas.jsx: STATE_META e Bubble bem isolados; renderização system centralizada e italicizada corretamente com data-testid=message-{id}."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase3.py (novo — 9 testes cobrindo state machine, system msgs, escalação explícita, resolve+alerts, isolamento)"
+  ],
+  "success_rate": {"backend": "100% Fase 3 (9/9); regressão global 102/109 (100% dos executados, 7 skipped)", "frontend": "100% dos data-testids Fase 3 verificados (conversation-state-badge, resolve-conversation-btn, pause/takeover/resume btns, system message bubbles)"},
+  "test_credentials": "construcaovilanova@gmail.com / Ravi@2026",
+  "seed_data_creation": "Escritório secundário TEST_Office3_* para isolamento (via /auth/register + /auth/onboarding/complete). Nenhum dado do escritório Silva foi apagado; a conversa demo do Carlos Eduardo foi exercitada (state ficou RESOLVED ao final do teste — main agent pode querer resetá-la para AI_HANDLING se precisar de nova demo).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Fase 3 completa. Regressão pytest -n0 = 102 passed. Ao final do último teste (test_resolve_closes_conversation_and_alerts), a conversa demo do Carlos Eduardo fica em state=RESOLVED — se precisar de estado inicial limpo para prints/demo, chamar POST /api/conversations/{id}/resume-ravi. Os testes usam a conversa demo diretamente (não criam nova) porque o pipeline exige cliente cadastrado. Se rodar em paralelo (-n auto) os testes deste arquivo colidem — use -n0.",
+  "rca of the issue": "N/A — implementação Fase 3 conforme spec. Únicos apontamentos são minor UX/API polish (state badge cores, 404 explícito nas ações, paginação de mensagens)."
+}

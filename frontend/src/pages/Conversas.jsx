@@ -14,7 +14,24 @@ const RISK_META = {
   red: { label: "Precisa de você", cls: "bg-rose-950/60 border-rose-700/50 text-rose-400", dot: "bg-rose-500" },
 };
 
+const STATE_META = {
+  OPEN: ["Aberta", "bg-[#161925] border-[#3F476C] text-zinc-400"],
+  AI_HANDLING: ["Ravi atendendo", "bg-indigo-950/60 border-indigo-700/50 text-indigo-300"],
+  WAITING_HUMAN: ["Aguardando você", "bg-amber-950/60 border-amber-700/50 text-amber-400"],
+  RESOLVED: ["Resolvida", "bg-emerald-950/60 border-emerald-700/50 text-emerald-400"],
+  PAUSED: ["Ravi pausado", "bg-zinc-800 border-zinc-700 text-zinc-400"],
+};
+
 function Bubble({ m }) {
+  if (m.sender === "system") {
+    return (
+      <div className="flex justify-center" data-testid={`message-${m.id}`}>
+        <p className="text-[11px] text-zinc-600 italic bg-[#0F111A] border border-[#23283E] rounded-full px-3 py-1">
+          {m.text}
+        </p>
+      </div>
+    );
+  }
   const isClient = m.sender === "client";
   const isRavi = m.sender === "ravi";
   return (
@@ -172,6 +189,9 @@ export default function Conversas() {
                 <Badge className={`border text-[10px] ${RISK_META[active.risk_level]?.cls || ""}`} data-testid="conversation-risk-badge">
                   {RISK_META[active.risk_level]?.label}
                 </Badge>
+                <Badge className={`border text-[10px] ${(STATE_META[active.state] || STATE_META.OPEN)[1]}`} data-testid="conversation-state-badge">
+                  {(STATE_META[active.state] || STATE_META.OPEN)[0]}
+                </Badge>
                 {active.human_control && <Badge className="bg-blue-950/60 border border-blue-700/50 text-blue-400 text-[10px]">Você está atendendo</Badge>}
                 {!active.ai_enabled && !active.human_control && <Badge className="bg-zinc-800 border border-zinc-700 text-zinc-400 text-[10px]">Ravi pausado</Badge>}
               </div>
@@ -181,7 +201,15 @@ export default function Conversas() {
                     className="bg-amber-950/60 border border-amber-700/50 text-amber-400 hover:bg-amber-900/60">
                     <Link2 size={14} className="mr-1.5" /> Identificar cliente
                   </Button>
-                ) : active.human_control || !active.ai_enabled ? (
+                ) : (
+                  <>
+                    {active.state !== "RESOLVED" && (
+                      <Button size="sm" variant="outline" onClick={() => doAction("resolve", "Conversa marcada como resolvida")}
+                        data-testid="resolve-conversation-btn" className="border-emerald-800/50 text-emerald-400 hover:bg-emerald-950/40">
+                        Resolver
+                      </Button>
+                    )}
+                    {active.human_control || !active.ai_enabled ? (
                   <Button size="sm" onClick={() => doAction("resume-ravi", "Ravi retomou o atendimento")} data-testid="resume-ravi-btn"
                     className="brand-gradient brand-gradient-hover text-white border-0">
                     <Play size={14} className="mr-1.5" /> Retomar Ravi
@@ -196,6 +224,8 @@ export default function Conversas() {
                       className="bg-blue-600 hover:bg-blue-500 text-white border-0">
                       <UserCheck size={14} className="mr-1.5" /> Assumir conversa
                     </Button>
+                  </>
+                    )}
                   </>
                 )}
               </div>

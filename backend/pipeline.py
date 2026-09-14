@@ -25,9 +25,10 @@ async def save_message(office_id: str, conversation_id: str, sender: str, text: 
         "delivered": delivered, "kind": kind, "created_at": now_iso(),
     }
     await db.messages.insert_one(msg)
-    await db.conversations.update_one({"id": conversation_id},
-                                      {"$set": {"last_message_at": msg["created_at"],
-                                                "last_message_text": text[:120]}})
+    set_fields = {"last_message_at": msg["created_at"], "updated_at": msg["created_at"]}
+    if sender != "system":
+        set_fields["last_message_text"] = text[:120]
+    await db.conversations.update_one({"id": conversation_id}, {"$set": set_fields})
     return msg
 
 
@@ -60,6 +61,7 @@ async def handle_inbound_message(office_id: str, phone: str, text: str,
             "client_id": client["id"] if client else None,
             "process_id": (client.get("process_ids") or [None])[0] if client else None,
             "status": "active" if client else "unidentified",
+            "state": "AI_HANDLING" if client else "WAITING_HUMAN", "updated_at": now_iso(),
             "risk_level": "green", "ai_enabled": True, "human_control": False,
             "assigned_user_id": None, "created_at": now_iso(), "last_message_at": now_iso(),
         }
@@ -93,7 +95,9 @@ async def handle_inbound_message(office_id: str, phone: str, text: str,
         reply = ESCALATION_REPLY
         await create_alert(office_id, "intervention", "Intervenção necessária", reason,
                            conversation_id=conv["id"], client_id=client["id"])
-        await db.conversations.update_one({"id": conv["id"]}, {"$set": {"risk_level": "red"}})
+        await db.conversations.update_one({"id": conv["id"]},
+                                          {"$set": {"risk_level": "red", "state": "WAITING_HUMAN",
+                                                    "updated_at": now_iso()}})
     else:
         history = await db.messages.find({"conversation_id": conv["id"]}, {"_id": 0}).sort("created_at", -1).to_list(50)
         history.reverse()
@@ -101,8 +105,13 @@ async def handle_inbound_message(office_id: str, phone: str, text: str,
         if level == "yellow":
             await create_alert(office_id, "monitoring", "Acompanhamento", reason,
                                conversation_id=conv["id"], client_id=client["id"])
-            await db.conversations.update_one({"id": conv["id"]}, {"$set": {"risk_level": "yellow"}})
+            await db.conversations.update_one({"id": conv["id"]},
+                                              {"$set": {"risk_level": "yellow", "state": "AI_HANDLING",
+                                                        "updated_at": now_iso()}})
         else:
+            await db.conversations.update_one({"id": conv["id"]},
+                                              {"$set": {"risk_level": "green", "state": "AI_HANDLING",
+                                                        "updated_at": now_iso()}})
             await audit(office_id, "auto_resolved", conversation_id=conv["id"],
                         client_id=client["id"], process_id=process["id"] if process else None)
 

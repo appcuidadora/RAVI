@@ -25,6 +25,8 @@ RED_SIGNALS = [
     "compensa", "devo ", "o que eu faço", "o que eu faco", "orienta", "decidir",
     "honorár", "honorar", "pagamento", "pagar", "desistir", "prazo", "multa",
     "reclama", "demora", "demorando", "absurdo", "raiva", "frustrad",
+    "falar com o advogado", "falar com advogado", "falar com o doutor", "quero falar",
+    "falar com humano", "atendente", "pessoa de verdade", "chamar o advogado",
 ]
 
 GREEN_SIGNALS = [

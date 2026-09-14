@@ -607,28 +607,58 @@ async def send_human_message(conv_id: str, data: TextIn, user: dict = Depends(re
 
 @router.post("/conversations/{conv_id}/pause-ravi")
 async def pause_ravi(conv_id: str, user: dict = Depends(require_permission("conversas"))):
-    await db.conversations.update_one({**office_filter(user), "id": conv_id},
-                                      {"$set": {"ai_enabled": False}})
+    res = await db.conversations.update_one({**office_filter(user), "id": conv_id},
+                                      {"$set": {"ai_enabled": False, "state": "PAUSED", "updated_at": now_iso()}})
+    if not res.matched_count:
+        raise HTTPException(404, "Conversa não encontrada")
+    await save_message(user["office_id"], conv_id, "system", "Ravi pausado pelo escritório.")
     await audit(user["office_id"], "ravi_paused", actor=user["email"], conversation_id=conv_id)
-    return {"ok": True, "ai_enabled": False}
+    return {"ok": True, "ai_enabled": False, "state": "PAUSED"}
 
 
 @router.post("/conversations/{conv_id}/takeover")
 async def takeover(conv_id: str, user: dict = Depends(require_permission("conversas"))):
-    await db.conversations.update_one({**office_filter(user), "id": conv_id},
+    res = await db.conversations.update_one({**office_filter(user), "id": conv_id},
                                       {"$set": {"human_control": True, "ai_enabled": False,
+                                                "state": "WAITING_HUMAN", "updated_at": now_iso(),
                                                 "assigned_user_id": user["id"], "status": "active"}})
+    if not res.matched_count:
+        raise HTTPException(404, "Conversa não encontrada")
+    await save_message(user["office_id"], conv_id, "system",
+                       f"Dr(a). {user.get('name', '')} assumiu o atendimento.")
     await audit(user["office_id"], "human_takeover", actor=user["email"], conversation_id=conv_id)
-    return {"ok": True, "human_control": True}
+    return {"ok": True, "human_control": True, "state": "WAITING_HUMAN"}
 
 
 @router.post("/conversations/{conv_id}/resume-ravi")
 async def resume_ravi(conv_id: str, user: dict = Depends(require_permission("conversas"))):
-    await db.conversations.update_one({**office_filter(user), "id": conv_id},
+    res = await db.conversations.update_one({**office_filter(user), "id": conv_id},
                                       {"$set": {"human_control": False, "ai_enabled": True,
+                                                "state": "AI_HANDLING", "updated_at": now_iso(),
                                                 "assigned_user_id": None, "risk_level": "green"}})
+    if not res.matched_count:
+        raise HTTPException(404, "Conversa não encontrada")
+    await save_message(user["office_id"], conv_id, "system", "Ravi retomou o atendimento automático.")
     await audit(user["office_id"], "ravi_resumed", actor=user["email"], conversation_id=conv_id)
-    return {"ok": True, "ai_enabled": True, "human_control": False}
+    return {"ok": True, "ai_enabled": True, "human_control": False, "state": "AI_HANDLING"}
+
+
+@router.post("/conversations/{conv_id}/resolve")
+async def resolve_conversation(conv_id: str, user: dict = Depends(require_permission("conversas"))):
+    res = await db.conversations.update_one({**office_filter(user), "id": conv_id},
+                                      {"$set": {"state": "RESOLVED", "updated_at": now_iso()}})
+    if not res.matched_count:
+        raise HTTPException(404, "Conversa não encontrada")
+    await save_message(user["office_id"], conv_id, "system",
+                       f"Conversa marcada como resolvida por {user.get('name', '')}.")
+    await create_alert(user["office_id"], "resolved", "Conversa resolvida",
+                       f"Resolvida por {user.get('name', '')}.", conversation_id=conv_id)
+    await db.alerts.update_many({"office_id": user["office_id"], "conversation_id": conv_id,
+                                 "status": "open"},
+                                {"$set": {"status": "resolved", "resolved_by": user["email"],
+                                          "resolved_at": now_iso()}})
+    await audit(user["office_id"], "conversation_resolved", actor=user["email"], conversation_id=conv_id)
+    return {"ok": True, "state": "RESOLVED"}
 
 
 class LinkClientIn(BaseModel):
