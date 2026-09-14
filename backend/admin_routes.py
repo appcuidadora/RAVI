@@ -434,7 +434,8 @@ async def meta_status(admin: dict = Depends(get_current_admin)):
     names = {o["id"]: o["name"] for o in await db.offices.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)}
     for c in conns:
         c["office_name"] = names.get(c["office_id"], "—")
-    test_meta = (doc or {}).get("secrets_meta", {}) if (doc := await db.platform_settings.find_one({"id": "global"}, {"_id": 0})) else {}
+    doc = await db.platform_settings.find_one({"id": "global"}, {"_id": 0})
+    test_meta = (doc or {}).get("secrets_meta", {})
     return {
         "secrets": {k: cfg(k) for k in ["META_APP_ID", "META_APP_SECRET", "META_CONFIG_ID", "META_WEBHOOK_VERIFY_TOKEN", "META_TEST_TOKEN"]},
         "ambiente": "produção" if cfg("META_APP_ID") else "teste",
@@ -491,10 +492,11 @@ async def health_check(admin: dict = Depends(get_current_admin)):
     meta_ok = token_ok = False
     if conn and conn.get("access_token"):
         try:
+            from whatsapp_meta import conn_token
             async with httpx.AsyncClient(timeout=15) as c:
                 r = await c.get(f"https://graph.facebook.com/{os.environ.get('META_GRAPH_VERSION', 'v25.0')}/{conn['phone_number_id']}",
                                 params={"fields": "display_phone_number"},
-                                headers={"Authorization": f"Bearer {conn['access_token']}"})
+                                headers={"Authorization": f"Bearer {conn_token(conn)}"})
             meta_ok = True
             token_ok = not r.is_error
         except Exception:

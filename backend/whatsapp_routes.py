@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from database import db
 from security import get_current_user, require_permission, office_filter, audit
 from whatsapp_meta import (meta_configured, exchange_code_for_token, subscribe_waba,
-                           fetch_phone_display)
+                           fetch_phone_display, encrypt_token, conn_token)
 from pipeline import handle_inbound_message
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ async def whatsapp_connect(data: ConnectIn, user: dict = Depends(require_permiss
         {"$set": {"id": uuid.uuid4().hex, "office_id": user["office_id"],
                   "business_account_id": data.waba_id, "phone_number_id": data.phone_number_id,
                   "display_phone_number": display, "status": "connected",
-                  "access_token": token, "updated_at": now},
+                  "access_token": encrypt_token(token), "updated_at": now},
          "$setOnInsert": {"created_at": now}},
         upsert=True)
     await audit(user["office_id"], "whatsapp_connected", actor=user["email"],
@@ -149,7 +149,7 @@ async def connect_callback(code: str = Query(None), state: str = Query(None)):
             {"$set": {"id": uuid.uuid4().hex, "office_id": st["office_id"],
                       "business_account_id": waba_id, "phone_number_id": phone_number_id,
                       "display_phone_number": display, "status": "connected",
-                      "access_token": token, "mode": "production", "updated_at": now2},
+                      "access_token": encrypt_token(token), "mode": "production", "updated_at": now2},
              "$setOnInsert": {"created_at": now2}},
             upsert=True)
         await audit(st["office_id"], "whatsapp_connected", actor="embedded_signup",
@@ -171,7 +171,7 @@ async def test_connection(user: dict = Depends(require_permission("whatsapp"))):
             r = await c.get(
                 f"https://graph.facebook.com/{os.environ.get('META_GRAPH_VERSION', 'v25.0')}/{conn['phone_number_id']}",
                 params={"fields": "display_phone_number,verified_name,quality_rating,status"},
-                headers={"Authorization": f"Bearer {conn.get('access_token', '')}"})
+                headers={"Authorization": f"Bearer {conn_token(conn)}"})
         if r.is_error:
             logger.error(f"test-connection Meta: {r.text}")
             raise HTTPException(400, "Não conseguimos validar a conexão agora. Reconecte o WhatsApp.")
@@ -215,7 +215,7 @@ async def whatsapp_connect_test(data: ConnectTestIn, user: dict = Depends(requir
         {"$set": {"id": uuid.uuid4().hex, "office_id": user["office_id"],
                   "business_account_id": waba_id, "phone_number_id": phone_id,
                   "display_phone_number": display, "status": "connected",
-                  "access_token": data.access_token.strip(), "mode": "test", "updated_at": now},
+                  "access_token": encrypt_token(data.access_token.strip()), "mode": "test", "updated_at": now},
          "$setOnInsert": {"created_at": now}},
         upsert=True)
     await audit(user["office_id"], "whatsapp_connected_test", actor=user["email"], phone_number_id=phone_id)
@@ -287,7 +287,7 @@ async def process_meta_message(connection: dict, msg: dict):
             try:
                 from whatsapp_meta import get_media_bytes
                 from ai import transcribe_audio
-                audio_bytes, _mime = await get_media_bytes(media_id, connection.get("access_token", ""))
+                audio_bytes, _mime = await get_media_bytes(media_id, conn_token(connection))
                 text = await transcribe_audio(audio_bytes)
                 kind = "audio"
                 if not text:

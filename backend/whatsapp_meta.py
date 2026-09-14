@@ -1,9 +1,34 @@
 import os
 import re
 import logging
+import base64
+import hashlib
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+def _fernet():
+    from cryptography.fernet import Fernet
+    key = base64.urlsafe_b64encode(hashlib.sha256(os.environ["JWT_SECRET"].encode()).digest())
+    return Fernet(key)
+
+
+def encrypt_token(token: str) -> str:
+    """Criptografa o access token antes de salvar no banco (token_reference seguro)."""
+    return _fernet().encrypt(token.encode()).decode()
+
+
+def conn_token(connection: dict) -> str:
+    """Descriptografa o token da conexão; aceita legado em texto puro (migração transparente)."""
+    raw = connection.get("access_token") or ""
+    if raw.startswith("gAAAA"):
+        try:
+            return _fernet().decrypt(raw.encode()).decode()
+        except Exception as e:
+            logger.error(f"Falha ao descriptografar token: {e}")
+            return ""
+    return raw
 
 
 def graph_base() -> str:
@@ -98,7 +123,7 @@ async def graph_send_text(connection: dict, to: str, body: str) -> dict:
     async with httpx.AsyncClient(timeout=20) as c:
         r = await c.post(
             f"{graph_base()}/{connection['phone_number_id']}/messages",
-            headers={"Authorization": f"Bearer {connection['access_token']}",
+            headers={"Authorization": f"Bearer {conn_token(connection)}",
                      "Content-Type": "application/json"},
             json=payload,
         )

@@ -29,6 +29,11 @@ SOCIO_ADMIN (total), ADVOGADO_ASSOCIADO, ESTAGIARIO, SECRETARIA_ATENDIMENTO — 
 - Admin: construcaovilanova@gmail.com / Ravi@2026 (Dr. Carlos Mendes, Silva Advocacia)
 - Demo seed: cliente Carlos Eduardo, processo 1001234-56.2025.8.26.0100 (TJSP), conversa demo, alerta vermelho, KPIs 50/63/41/3/3h42
 
+## FASE 4 — WhatsApp Meta (10/09/2026)
+- Já existente e testado: webhook GET/POST público, roteamento phone_number_id→office_id, novo contato→unidentified+alerta+criar/vincular, Embedded Signup com state seguro, admin de secrets write-only
+- Novo: criptografia de tokens em repouso (Fernet derivado de JWT_SECRET) — encrypt_token ao salvar (connect-test + callback), conn_token com fallback transparente para legado em texto puro; todos os pontos de leitura migrados (envio, test-connection, health check, download de mídia)
+- webhook processa inbound mesmo com token_expired (envio falha graciosamente, recebimento continua)
+
 ## FASE 3 — Conversas e Inteligência (10/09/2026)
 - Máquina de estados formal: OPEN/AI_HANDLING/WAITING_HUMAN/RESOLVED/PAUSED (RED → WAITING_HUMAN; takeover → WAITING_HUMAN; pause → PAUSED; resume → AI_HANDLING; resolve → RESOLVED)
 - Mensagens SYSTEM na timeline (pause/assume/retoma/resolve) com render próprio centralizado
