@@ -35,6 +35,22 @@ app.add_middleware(
 )
 
 
+@app.get("/api/health")
+async def health_check():
+    try:
+        await db.command("ping")
+        return {"status": "ok", "mongo": "ok"}
+    except Exception:
+        return {"status": "degraded", "mongo": "error"}
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, exc):
+    logger.exception("Erro não tratado em %s %s: %s", request.method, request.url.path, exc)
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"detail": "Erro interno do servidor"}, status_code=500)
+
+
 @app.on_event("startup")
 async def startup():
     doc = await db.platform_settings.find_one({"id": "global"})

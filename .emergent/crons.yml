@@ -6,3 +6,10 @@ crons:
     endpoint: "{{BASE_URL}}/api/cron/billing-reminders"
     method: POST
     enabled: true
+  - name: backup-database
+    description: "Backup diário do MongoDB (mongodump gzip) enviado ao object storage, com 7 cópias locais"
+    cron: "0 6 * * *"
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    endpoint: "{{BASE_URL}}/api/cron/backup-database"
+    method: POST
+    enabled: true

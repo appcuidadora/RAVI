@@ -13,7 +13,7 @@ from pydantic import BaseModel, EmailStr
 from database import db
 from security import (hash_password, verify_password, set_auth_cookies, public_user,
                       get_current_user, default_permissions, get_jwt_secret,
-                      create_access_token)
+                      create_access_token, audit)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -102,11 +102,23 @@ async def login(data: LoginIn, request: Request, response: Response):
         raise HTTPException(403, "Usuário desativado. Fale com o sócio administrador.")
     await db.login_attempts.delete_many({"identifier": identifier})
     set_auth_cookies(response, user)
+    await audit(user.get("office_id"), "user_login", actor=email)
     return {"user": public_user(user), "office": await get_office_payload(user)}
 
 
 @router.post("/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response):
+    token = request.cookies.get("refresh_token")
+    if token:
+        try:
+            payload = jwt.decode(token, get_jwt_secret(), algorithms=["HS256"])
+            if payload.get("type") == "refresh":
+                await db.users.update_one({"id": payload["sub"]}, {"$inc": {"token_version": 1}})
+                u = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "email": 1, "office_id": 1})
+                if u:
+                    await audit(u.get("office_id"), "user_logout", actor=u["email"])
+        except jwt.InvalidTokenError:
+            pass
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
     return {"ok": True}
@@ -204,6 +216,7 @@ async def forgot_password(data: ForgotIn, background_tasks: BackgroundTasks):
     user = await db.users.find_one({"email": email})
     if not user:
         return GENERIC_RESET_RESPONSE
+    await audit(user.get("office_id"), "password_reset_requested", actor=email)
     token = secrets.token_urlsafe(32)
     await db.password_reset_tokens.insert_one({
         "token_hash": hashlib.sha256(token.encode()).hexdigest(),
@@ -215,16 +228,18 @@ async def forgot_password(data: ForgotIn, background_tasks: BackgroundTasks):
 
 @router.post("/reset-password")
 async def reset_password(data: ResetIn):
+    if len(data.password) < 6:
+        raise HTTPException(400, "A senha deve ter pelo menos 6 caracteres")
     h = hashlib.sha256(data.token.encode()).hexdigest()
     doc = await db.password_reset_tokens.find_one_and_update(
         {"token_hash": h, "used": False, "expires_at": {"$gt": now()}}, {"$set": {"used": True}})
     if not doc:
         raise HTTPException(400, "Link inválido ou expirado")
-    if len(data.password) < 6:
-        raise HTTPException(400, "A senha deve ter pelo menos 6 caracteres")
     await db.users.update_one({"id": doc["user_id"]},
                               {"$set": {"password_hash": hash_password(data.password)},
                                "$inc": {"token_version": 1}})
     await db.password_reset_tokens.delete_many({"user_id": doc["user_id"], "used": False})
     await db.login_attempts.delete_many({"email": doc["email"]})
+    u = await db.users.find_one({"id": doc["user_id"]}, {"_id": 0, "office_id": 1})
+    await audit((u or {}).get("office_id"), "password_reset_completed", actor=doc["email"])
     return {"message": "Senha redefinida com sucesso"}

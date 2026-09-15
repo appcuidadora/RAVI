@@ -15,6 +15,7 @@ import json
 import subprocess
 import requests
 import pytest
+from _webhook_sign import signed_webhook_post
 
 BASE = os.environ.get("REACT_APP_BACKEND_URL", "https://ravi-client.preview.emergentagent.com").rstrip("/")
 API = f"{BASE}/api"
@@ -93,7 +94,7 @@ class TestWebhookInbound:
     def test_inbound_from_known_number_creates_conversation_and_ravi_reply(self, admin_session):
         msg_id = f"wamid.test-{uuid.uuid4().hex}"
         payload = _build_payload(CARLOS_PHONE, "Teve novidade no meu processo?", msg_id)
-        r = requests.post(f"{API}/webhooks/whatsapp", json=payload)
+        r = signed_webhook_post(payload)
         assert r.status_code == 200, r.text
         assert r.json() == {"ok": True}
 
@@ -138,7 +139,7 @@ class TestWebhookInbound:
         payload = _build_payload(CARLOS_PHONE, "Bom dia doutor, tudo bem?", msg_id)
 
         # 1º envio
-        r1 = requests.post(f"{API}/webhooks/whatsapp", json=payload)
+        r1 = signed_webhook_post(payload)
         assert r1.status_code == 200
         time.sleep(6)
 
@@ -151,7 +152,7 @@ class TestWebhookInbound:
         count_before = len(detail1["messages"])
 
         # 2º envio (mesmo id)
-        r2 = requests.post(f"{API}/webhooks/whatsapp", json=payload)
+        r2 = signed_webhook_post(payload)
         assert r2.status_code == 200
         time.sleep(4)
 
@@ -168,7 +169,7 @@ class TestWebhookInbound:
 
         msg_id = f"wamid.test-unk-{uuid.uuid4().hex}"
         payload = _build_payload("5511999999999", "hello", msg_id, phone_number_id="999999")
-        r = requests.post(f"{API}/webhooks/whatsapp", json=payload)
+        r = signed_webhook_post(payload)
         assert r.status_code == 200
         time.sleep(2)
 
@@ -183,7 +184,7 @@ class TestWebhookLogging:
     def test_logger_records_incoming_payload(self):
         marker = f"logmarker-{uuid.uuid4().hex[:8]}"
         payload = _build_payload(CARLOS_PHONE, marker, f"wamid.test-log-{uuid.uuid4().hex}")
-        r = requests.post(f"{API}/webhooks/whatsapp", json=payload)
+        r = signed_webhook_post(payload)
         assert r.status_code == 200
         time.sleep(1)
         # Ler logs do supervisor do backend
@@ -194,4 +195,5 @@ class TestWebhookLogging:
         except Exception as e:
             pytest.skip(f"Não foi possível ler logs: {e}")
         assert "Webhook Meta recebido" in out, "Log 'Webhook Meta recebido' ausente"
-        assert marker in out, "Marker do payload não apareceu nos logs"
+        # Fase 7 (SEC): conteúdo da mensagem não é mais logado (PII) — apenas metadados
+        assert marker not in out, "Conteúdo da mensagem não deve aparecer nos logs"

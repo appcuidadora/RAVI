@@ -13,6 +13,7 @@ import time
 import uuid
 import requests
 import pytest
+from _webhook_sign import signed_webhook_post
 
 BASE = os.environ.get("REACT_APP_BACKEND_URL", "https://ravi-client.preview.emergentagent.com").rstrip("/")
 API = f"{BASE}/api"
@@ -72,7 +73,7 @@ class TestAudioWebhook:
             "audio": {"id": "fake-media-id-does-not-exist-999",
                       "mime_type": "audio/ogg; codecs=opus", "voice": True},
         })
-        r = requests.post(f"{API}/webhooks/whatsapp", json=payload)
+        r = signed_webhook_post(payload)
         assert r.status_code == 200
         assert r.json() == {"ok": True}
         time.sleep(3)
@@ -90,7 +91,7 @@ class TestAudioWebhook:
         conv_id, count_before = _snapshot_msgs(admin_session)
         msg = {"from": CARLOS_PHONE, "id": f"wamid.{mtype}-{uuid.uuid4().hex}",
                "timestamp": str(int(time.time())), "type": mtype, **body}
-        r = requests.post(f"{API}/webhooks/whatsapp", json=_envelope(msg))
+        r = signed_webhook_post(_envelope(msg))
         assert r.status_code == 200
         time.sleep(1)
         _, count_after = _snapshot_msgs(admin_session)
@@ -108,7 +109,7 @@ class TestAudioWebhook:
             "timestamp": str(int(time.time())),
             "type": "text", "text": {"body": f"Oi doutor, {marker}"},
         })
-        r = requests.post(f"{API}/webhooks/whatsapp", json=payload)
+        r = signed_webhook_post(payload)
         assert r.status_code == 200
         # aguarda pipeline
         deadline = time.time() + 25

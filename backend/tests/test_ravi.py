@@ -72,10 +72,16 @@ class TestAuth:
         assert "message" in r.json()
 
     def test_logout(self):
+        # Usa usuário descartável: logout agora invalida a sessão de verdade (token_version),
+        # então não pode derrubar a sessão do usuário demo usada pelos demais testes.
+        email = f"logout_{uuid.uuid4().hex[:8]}@teste.com"
         s = requests.Session()
-        s.post(f"{API}/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+        r = s.post(f"{API}/auth/register", json={"name": "T", "email": email, "password": "Teste@123"})
+        assert r.status_code == 200
+        assert s.get(f"{API}/auth/me").status_code == 200
         r = s.post(f"{API}/auth/logout")
         assert r.status_code == 200
+        assert s.get(f"{API}/auth/me").status_code == 401
 
 
 # ---------- dashboard ----------

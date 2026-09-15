@@ -9,6 +9,7 @@ import hashlib
 import asyncio
 import requests
 import pytest
+from _webhook_sign import signed_webhook_post
 
 # Garante import do backend + carrega .env (JWT_SECRET necessário para Fernet)
 sys.path.insert(0, "/app/backend")
@@ -185,7 +186,7 @@ class TestWebhookPOST:
         """phone_number_id desconhecido → 200, sem criar nada."""
         payload = _webhook_payload("999_nonexistent_999", "5599999999999",
                                    "Test unknown pnid", f"wamid.unk_{uuid.uuid4().hex[:12]}")
-        r = requests.post(f"{API}/webhooks/whatsapp", json=payload)
+        r = signed_webhook_post(payload)
         assert r.status_code == 200, r.text
         assert r.json().get("ok") is True
 
@@ -194,7 +195,7 @@ class TestWebhookPOST:
         msg_id = f"wamid.p4_{uuid.uuid4().hex[:16]}"
         from_num = "55119" + "".join(__import__("random").choices("0123456789", k=8))
         payload = _webhook_payload(known_phone_number_id, from_num, "Olá, teste fase 4", msg_id)
-        r = requests.post(f"{API}/webhooks/whatsapp", json=payload)
+        r = signed_webhook_post(payload)
         assert r.status_code == 200, r.text
         # Aguarda background task
         import time
@@ -213,11 +214,11 @@ class TestWebhookPOST:
         msg_id = f"wamid.idem_{uuid.uuid4().hex[:16]}"
         from_num = "55119" + "".join(__import__("random").choices("0123456789", k=8))
         payload = _webhook_payload(known_phone_number_id, from_num, "Msg idempotência", msg_id)
-        r1 = requests.post(f"{API}/webhooks/whatsapp", json=payload)
+        r1 = signed_webhook_post(payload)
         assert r1.status_code == 200
         import time
         time.sleep(2)
-        r2 = requests.post(f"{API}/webhooks/whatsapp", json=payload)
+        r2 = signed_webhook_post(payload)
         assert r2.status_code == 200
         # Sem exceção; idempotência é interna. Não temos endpoint pra contar msgs sem conv id,
         # mas ao menos ambos retornaram 200 sem erro (o pipeline dedupe por meta_message_id).
@@ -244,7 +245,7 @@ class TestNewContactUnidentified:
             from_num = "55119" + "".join(__import__("random").choices("0123456789", k=8))
             msg_id = f"wamid.nc_{uuid.uuid4().hex[:16]}"
             payload = _webhook_payload(pnid, from_num, "Oi, gostaria de saber sobre serviços", msg_id)
-            r = requests.post(f"{API}/webhooks/whatsapp", json=payload)
+            r = signed_webhook_post(payload)
             assert r.status_code == 200
             import time
             time.sleep(4)
@@ -295,7 +296,7 @@ class TestMultiTenantRouting:
         n_before = len(r_before.json())
         payload = _webhook_payload("000_ghost_pnid_000", "5599111112222",
                                    "Test ghost pnid", f"wamid.ghost_{uuid.uuid4().hex[:12]}")
-        requests.post(f"{API}/webhooks/whatsapp", json=payload)
+        signed_webhook_post(payload)
         import time
         time.sleep(2)
         r_after = admin_session.get(f"{API}/conversations")

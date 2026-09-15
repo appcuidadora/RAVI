@@ -123,6 +123,7 @@ async def delete_client(client_id: str, user: dict = Depends(require_permission(
     res = await db.clients.delete_one({**office_filter(user), "id": client_id})
     if not res.deleted_count:
         raise HTTPException(404, "Cliente não encontrado")
+    await audit(user["office_id"], "client_deleted", actor=user["email"], client_id=client_id)
     return {"ok": True}
 
 
@@ -259,7 +260,8 @@ async def get_process(process_id: str, user: dict = Depends(require_permission("
     if not proc:
         raise HTTPException(404, "Processo não encontrado")
     if proc.get("client_id"):
-        proc["client"] = await db.clients.find_one({"id": proc["client_id"]}, {"_id": 0})
+        proc["client"] = await db.clients.find_one(
+            {"id": proc["client_id"], "office_id": user["office_id"]}, {"_id": 0})
     proc["conversations_count"] = await db.conversations.count_documents(
         {"office_id": user["office_id"], "process_id": process_id})
     for d in proc.get("documentos", []):
@@ -473,6 +475,28 @@ async def cron_billing_reminders(request: Request, background_tasks: BackgroundT
     return {"ok": True}
 
 
+@router.post("/cron/backup-database")
+async def cron_backup_database(request: Request, background_tasks: BackgroundTasks):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    import hmac as _hmac
+    secret = os.environ.get("WEBHOOK_CRON_SECRET", "")
+    auth = request.headers.get("Authorization", "")
+    token = auth[7:] if auth.startswith("Bearer ") else ""
+    if not secret or not _hmac.compare_digest(token, secret):
+        raise HTTPException(401, "Não autorizado")
+    try:
+        envelope = await request.json()
+    except Exception:
+        raise HTTPException(400, "Envelope inválido")
+    run_id = envelope.get("run_id") or request.headers.get("X-Webhook-Id") or uuid.uuid4().hex
+    if await db.cron_runs.find_one({"run_id": run_id}):
+        return {"ok": True, "duplicate": True}
+    await db.cron_runs.insert_one({"run_id": run_id, "job": "backup-database", "created_at": now_iso()})
+    from backup import run_backup
+    background_tasks.add_task(run_backup)
+    return {"ok": True, "started": True}
+
+
 async def send_billing_reminders():
     from zoneinfo import ZoneInfo
     from datetime import date as _date
@@ -547,13 +571,21 @@ async def send_billing_reminders():
 @router.get("/conversations")
 async def list_conversations(user: dict = Depends(require_permission("conversas"))):
     convs = await db.conversations.find(office_filter(user), {"_id": 0}).sort("last_message_at", -1).to_list(200)
+    client_ids = list({c["client_id"] for c in convs if c.get("client_id")})
+    user_ids = list({c["assigned_user_id"] for c in convs if c.get("assigned_user_id")})
+    clients = {}
+    if client_ids:
+        clients = {c["id"]: c for c in await db.clients.find(
+            {"office_id": user["office_id"], "id": {"$in": client_ids}},
+            {"_id": 0, "id": 1, "name": 1, "phone": 1}).to_list(500)}
+    users = {}
+    if user_ids:
+        users = {u["id"]: u["name"] for u in await db.users.find(
+            {"office_id": user["office_id"], "id": {"$in": user_ids}},
+            {"_id": 0, "id": 1, "name": 1}).to_list(200)}
     for c in convs:
-        c["client"] = None
-        if c.get("client_id"):
-            c["client"] = await db.clients.find_one({"id": c["client_id"]}, {"_id": 0, "id": 1, "name": 1, "phone": 1})
-        if c.get("assigned_user_id"):
-            u = await db.users.find_one({"id": c["assigned_user_id"]}, {"_id": 0, "name": 1})
-            c["assigned_user_name"] = u["name"] if u else None
+        c["client"] = clients.get(c.get("client_id"))
+        c["assigned_user_name"] = users.get(c.get("assigned_user_id"))
     return convs
 
 
@@ -565,10 +597,12 @@ async def get_conversation(conv_id: str, user: dict = Depends(require_permission
     conv["messages"] = await db.messages.find({"conversation_id": conv_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
     conv["client"] = None
     if conv.get("client_id"):
-        conv["client"] = await db.clients.find_one({"id": conv["client_id"]}, {"_id": 0})
+        conv["client"] = await db.clients.find_one(
+            {"id": conv["client_id"], "office_id": user["office_id"]}, {"_id": 0})
     conv["process"] = None
     if conv.get("process_id"):
-        conv["process"] = await db.processes.find_one({"id": conv["process_id"]}, {"_id": 0})
+        conv["process"] = await db.processes.find_one(
+            {"id": conv["process_id"], "office_id": user["office_id"]}, {"_id": 0})
     return conv
 
 
@@ -679,7 +713,10 @@ async def link_client(conv_id: str, data: LinkClientIn, user: dict = Depends(req
     if not conv:
         raise HTTPException(404, "Conversa não encontrada")
     client_id = data.client_id
-    if not client_id:
+    if client_id:
+        if not await db.clients.find_one({**office_filter(user), "id": client_id}, {"_id": 0, "id": 1}):
+            raise HTTPException(404, "Cliente não encontrado")
+    else:
         if not data.new_client_name:
             raise HTTPException(400, "Informe o cliente")
         client_id = uuid.uuid4().hex
@@ -705,11 +742,14 @@ async def list_alerts(status: str = "open", user: dict = Depends(require_permiss
     if status != "all":
         q["status"] = status
     alerts = await db.alerts.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
+    client_ids = list({a["client_id"] for a in alerts if a.get("client_id")})
+    clients = {}
+    if client_ids:
+        clients = {c["id"]: c["name"] for c in await db.clients.find(
+            {"office_id": user["office_id"], "id": {"$in": client_ids}},
+            {"_id": 0, "id": 1, "name": 1}).to_list(500)}
     for a in alerts:
-        a["client_name"] = None
-        if a.get("client_id"):
-            c = await db.clients.find_one({"id": a["client_id"]}, {"_id": 0, "name": 1})
-            a["client_name"] = c["name"] if c else None
+        a["client_name"] = clients.get(a.get("client_id"))
     return alerts
 
 
@@ -720,6 +760,7 @@ async def resolve_alert(alert_id: str, user: dict = Depends(require_permission("
                                                "resolved_at": now_iso()}})
     if not res.matched_count:
         raise HTTPException(404, "Alerta não encontrado")
+    await audit(user["office_id"], "alert_resolved", actor=user["email"], alert_id=alert_id)
     return {"ok": True}
 
 
@@ -824,6 +865,8 @@ async def update_settings(data: OfficeSettingsIn, user: dict = Depends(require_s
     updates = {k: v for k, v in data.model_dump().items() if v is not None}
     if updates:
         await db.offices.update_one({"id": user["office_id"]}, {"$set": updates})
+        await audit(user["office_id"], "office_settings_updated", actor=user["email"],
+                    campos=list(updates.keys()))
     return await db.offices.find_one({"id": user["office_id"]}, {"_id": 0, "demo_metrics": 0})
 
 

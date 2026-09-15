@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, Depends
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from database import db
-from security import hash_password, verify_password, get_jwt_secret
+from security import hash_password, verify_password, get_jwt_secret, audit
 from usage import record_usage_event, CATEGORIES, current_period
 
 logger = logging.getLogger(__name__)
@@ -61,6 +61,15 @@ async def get_current_admin(request: Request) -> dict:
     if not admin.get("active", True):
         raise HTTPException(403, "Administrador desativado")
     return admin
+
+
+def require_admin_roles(*roles):
+    """RBAC do RAVI ADMIN: SUPER_ADMIN sempre passa; demais perfis só acessam funções listadas."""
+    async def checker(admin: dict = Depends(get_current_admin)):
+        if admin["role"] != "SUPER_ADMIN" and admin["role"] not in roles:
+            raise HTTPException(403, "Perfil administrativo sem acesso a esta função")
+        return admin
+    return checker
 
 
 async def get_platform_secrets() -> dict:
@@ -230,7 +239,7 @@ class OfficePatch(BaseModel):
 
 
 @router.patch("/offices/{office_id}")
-async def update_office(office_id: str, data: OfficePatch, admin: dict = Depends(get_current_admin)):
+async def update_office(office_id: str, data: OfficePatch, admin: dict = Depends(require_admin_roles("ADMIN_OPERACOES", "ADMIN_FINANCEIRO"))):
     office = await db.offices.find_one({"id": office_id}, {"_id": 0})
     if not office:
         raise HTTPException(404, "Escritório não encontrado")
@@ -263,6 +272,8 @@ async def update_office(office_id: str, data: OfficePatch, admin: dict = Depends
             "created_by": admin["email"], "created_at": now_iso()})
         await admin_log(admin, "subscription_changed", office_id=office_id,
                         plan=(new_plan or {}).get("name"), apply=plan_apply)
+        await audit(office_id, "plan_changed", actor=f"admin:{admin['email']}",
+                    de=(old_plan or {}).get("name"), para=(new_plan or {}).get("name"), apply=plan_apply)
     if updates.get("status") == "canceled":
         await db.cancellations.insert_one({"id": uuid.uuid4().hex, "office_id": office_id,
                                            "plano_anterior": office.get("plan_id"),
@@ -279,7 +290,7 @@ class ImpersonateIn(BaseModel):
 
 
 @router.post("/offices/{office_id}/impersonate")
-async def impersonate(office_id: str, data: ImpersonateIn, admin: dict = Depends(get_current_admin)):
+async def impersonate(office_id: str, data: ImpersonateIn, admin: dict = Depends(require_admin_roles())):
     """Visualizar como escritório: sessão auditada, sem compartilhar senha."""
     if not data.motivo.strip():
         raise HTTPException(400, "Informe o motivo do acesso")
@@ -321,7 +332,7 @@ async def list_plans(admin: dict = Depends(get_current_admin)):
 
 
 @router.post("/plans")
-async def create_plan(data: PlanIn, admin: dict = Depends(get_current_admin)):
+async def create_plan(data: PlanIn, admin: dict = Depends(require_admin_roles("ADMIN_FINANCEIRO"))):
     plan = {"id": uuid.uuid4().hex, **data.model_dump(), "created_at": now_iso()}
     await db.plans.insert_one(plan)
     await db.plan_versions.insert_one(_plan_version(plan, 1, admin))
@@ -349,7 +360,7 @@ async def list_plan_versions(plan_id: str, admin: dict = Depends(get_current_adm
 
 
 @router.patch("/plans/{plan_id}")
-async def update_plan(plan_id: str, data: PlanIn, admin: dict = Depends(get_current_admin)):
+async def update_plan(plan_id: str, data: PlanIn, admin: dict = Depends(require_admin_roles("ADMIN_FINANCEIRO"))):
     old = await db.plans.find_one({"id": plan_id}, {"_id": 0})
     if not old:
         raise HTTPException(404, "Plano não encontrado")
@@ -428,7 +439,7 @@ class ChargeIn(BaseModel):
 
 
 @router.post("/billing/charges")
-async def create_charge(data: ChargeIn, admin: dict = Depends(get_current_admin)):
+async def create_charge(data: ChargeIn, admin: dict = Depends(require_admin_roles("ADMIN_FINANCEIRO"))):
     if not await db.offices.find_one({"id": data.office_id}):
         raise HTTPException(404, "Escritório não encontrado")
     charge = {"id": uuid.uuid4().hex, **data.model_dump(), "juros": 0, "multa": 0,
@@ -447,7 +458,7 @@ class PayIn(BaseModel):
 
 
 @router.post("/billing/charges/{charge_id}/pay")
-async def pay_charge(charge_id: str, data: PayIn, admin: dict = Depends(get_current_admin)):
+async def pay_charge(charge_id: str, data: PayIn, admin: dict = Depends(require_admin_roles("ADMIN_FINANCEIRO"))):
     charge = await db.charges.find_one({"id": charge_id}, {"_id": 0})
     if not charge:
         raise HTTPException(404, "Cobrança não encontrada")
@@ -464,7 +475,7 @@ async def pay_charge(charge_id: str, data: PayIn, admin: dict = Depends(get_curr
 
 
 @router.post("/billing/charges/{charge_id}/cancel")
-async def cancel_charge(charge_id: str, admin: dict = Depends(get_current_admin)):
+async def cancel_charge(charge_id: str, admin: dict = Depends(require_admin_roles("ADMIN_FINANCEIRO"))):
     res = await db.charges.update_one({"id": charge_id, "status": "pending"}, {"$set": {"status": "canceled"}})
     if not res.matched_count:
         raise HTTPException(404, "Cobrança pendente não encontrada")
@@ -502,7 +513,7 @@ class SecretsIn(BaseModel):
 
 
 @router.post("/meta/secrets")
-async def update_secrets(data: SecretsIn, admin: dict = Depends(get_current_admin)):
+async def update_secrets(data: SecretsIn, admin: dict = Depends(require_admin_roles("ADMIN_TECNOLOGIA"))):
     """Secrets são write-only: salvos no servidor, nunca devolvidos ao frontend."""
     mapping = {"META_APP_ID": data.meta_app_id, "META_APP_SECRET": data.meta_app_secret,
                "META_CONFIG_ID": data.meta_config_id, "META_TEST_TOKEN": data.meta_test_token}
@@ -700,7 +711,7 @@ class TicketPatch(BaseModel):
 
 
 @router.patch("/tickets/{ticket_id}")
-async def update_ticket(ticket_id: str, data: TicketPatch, admin: dict = Depends(get_current_admin)):
+async def update_ticket(ticket_id: str, data: TicketPatch, admin: dict = Depends(require_admin_roles("ADMIN_SUPORTE", "ADMIN_OPERACOES"))):
     updates = {k: v for k, v in data.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(400, "Nada para atualizar")
@@ -727,7 +738,7 @@ async def get_ai_settings(admin: dict = Depends(get_current_admin)):
 
 
 @router.put("/settings/ai")
-async def put_ai_settings(data: AIConfigIn, admin: dict = Depends(get_current_admin)):
+async def put_ai_settings(data: AIConfigIn, admin: dict = Depends(require_admin_roles("ADMIN_TECNOLOGIA"))):
     updates = {f"ai_config.{k}": v for k, v in data.model_dump().items() if v is not None}
     if updates:
         await db.platform_settings.update_one({"id": "global"}, {"$set": updates}, upsert=True)
@@ -754,7 +765,7 @@ async def list_meta_pricing(admin: dict = Depends(get_current_admin)):
 
 
 @router.post("/pricing/meta")
-async def create_meta_pricing(data: MetaPricingIn, admin: dict = Depends(get_current_admin)):
+async def create_meta_pricing(data: MetaPricingIn, admin: dict = Depends(require_admin_roles("ADMIN_FINANCEIRO"))):
     if data.category not in CATEGORIES:
         raise HTTPException(400, f"Categoria inválida. Use: {', '.join(CATEGORIES)}")
     row = {"id": uuid.uuid4().hex, **data.model_dump(), "created_by": admin["email"], "created_at": now_iso()}
@@ -765,7 +776,7 @@ async def create_meta_pricing(data: MetaPricingIn, admin: dict = Depends(get_cur
 
 
 @router.patch("/pricing/meta/{rate_id}")
-async def update_meta_pricing(rate_id: str, data: MetaPricingIn, admin: dict = Depends(get_current_admin)):
+async def update_meta_pricing(rate_id: str, data: MetaPricingIn, admin: dict = Depends(require_admin_roles("ADMIN_FINANCEIRO"))):
     res = await db.whatsapp_pricing.update_one({"id": rate_id}, {"$set": data.model_dump()})
     if not res.matched_count:
         raise HTTPException(404, "Tarifa não encontrada")
@@ -793,7 +804,7 @@ async def list_customer_rates(admin: dict = Depends(get_current_admin)):
 
 
 @router.post("/pricing/customer")
-async def create_customer_rate(data: CustomerRateIn, admin: dict = Depends(get_current_admin)):
+async def create_customer_rate(data: CustomerRateIn, admin: dict = Depends(require_admin_roles("ADMIN_FINANCEIRO"))):
     if data.category not in CATEGORIES:
         raise HTTPException(400, f"Categoria inválida. Use: {', '.join(CATEGORIES)}")
     if not await db.plans.find_one({"id": data.plan_id}):
@@ -807,7 +818,7 @@ async def create_customer_rate(data: CustomerRateIn, admin: dict = Depends(get_c
 
 
 @router.patch("/pricing/customer/{rate_id}")
-async def update_customer_rate(rate_id: str, data: CustomerRateIn, admin: dict = Depends(get_current_admin)):
+async def update_customer_rate(rate_id: str, data: CustomerRateIn, admin: dict = Depends(require_admin_roles("ADMIN_FINANCEIRO"))):
     res = await db.whatsapp_customer_rates.update_one({"id": rate_id}, {"$set": data.model_dump()})
     if not res.matched_count:
         raise HTTPException(404, "Tarifa não encontrada")
@@ -823,7 +834,7 @@ class UsageEventIn(BaseModel):
 
 
 @router.post("/usage-events")
-async def create_usage_events(data: UsageEventIn, admin: dict = Depends(get_current_admin)):
+async def create_usage_events(data: UsageEventIn, admin: dict = Depends(require_admin_roles("ADMIN_FINANCEIRO"))):
     """Registro administrativo de eventos de consumo (testes, backfill, ajustes operacionais)."""
     if not await db.offices.find_one({"id": data.office_id}):
         raise HTTPException(404, "Escritório não encontrado")
@@ -847,7 +858,7 @@ class WaInvoiceGenIn(BaseModel):
 
 
 @router.post("/billing/whatsapp-invoices/generate")
-async def generate_wa_invoice(data: WaInvoiceGenIn, admin: dict = Depends(get_current_admin)):
+async def generate_wa_invoice(data: WaInvoiceGenIn, admin: dict = Depends(require_admin_roles("ADMIN_FINANCEIRO"))):
     events = await db.whatsapp_usage_events.find(
         {"office_id": data.office_id, "billing_period": data.period, "billable": True, "invoice_id": None},
         {"_id": 0}).to_list(20000)

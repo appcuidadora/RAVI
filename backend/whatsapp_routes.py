@@ -234,20 +234,30 @@ async def webhook_verify(hub_mode: str = Query(None, alias="hub.mode"),
     raise HTTPException(403, "Falha na verificação do webhook")
 
 
+async def _meta_app_secret() -> str:
+    sec = os.environ.get("META_APP_SECRET", "")
+    if sec:
+        return sec
+    doc = await db.platform_settings.find_one({"id": "global"}, {"_id": 0, "secrets.META_APP_SECRET": 1})
+    return (((doc or {}).get("secrets")) or {}).get("META_APP_SECRET", "")
+
+
 @router.post("/webhooks/whatsapp")
 async def webhook_receive(request: Request, background_tasks: BackgroundTasks):
     raw = await request.body()
-    app_secret = os.environ.get("META_APP_SECRET", "")
-    if app_secret:
-        sig = request.headers.get("x-hub-signature-256", "")
-        expected = "sha256=" + hmac.new(app_secret.encode(), raw, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, sig):
-            raise HTTPException(403, "Assinatura inválida")
+    app_secret = await _meta_app_secret()
+    if not app_secret:
+        logger.error("Webhook rejeitado: META_APP_SECRET não configurado")
+        raise HTTPException(503, "Webhook não configurado")
+    sig = request.headers.get("x-hub-signature-256", "")
+    expected = "sha256=" + hmac.new(app_secret.encode(), raw, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        raise HTTPException(403, "Assinatura inválida")
     try:
         payload = json.loads(raw)
     except Exception:
         raise HTTPException(400, "Payload inválido")
-    logger.info(f"Webhook Meta recebido: {raw[:2000].decode('utf-8', 'replace')}")
+    logger.info("Webhook Meta recebido: %d entrada(s)", len(payload.get("entry", [])))
 
     for entry in payload.get("entry", []):
         for change in entry.get("changes", []):

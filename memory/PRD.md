@@ -29,6 +29,20 @@ SOCIO_ADMIN (total), ADVOGADO_ASSOCIADO, ESTAGIARIO, SECRETARIA_ATENDIMENTO — 
 - Admin: construcaovilanova@gmail.com / Ravi@2026 (Dr. Carlos Mendes, Silva Advocacia)
 - Demo seed: cliente Carlos Eduardo, processo 1001234-56.2025.8.26.0100 (TJSP), conversa demo, alerta vermelho, KPIs 50/63/41/3/3h42
 
+## FASE 7 — Segurança, Testes e Produção (14/09/2026) — VALIDADA
+- Auditoria de segurança (security_audit_agent): veredito inicial FAIL → todas as correções aplicadas e revalidadas (iteration_15: fase7 20/20, regressão 181 passed / 7 skipped / 0 failed; E2E frontend 100%)
+- SEC-001: RBAC do RAVI ADMIN por perfil (require_admin_roles) — impersonate só SUPER_ADMIN; planos/billing/pricing/faturas = ADMIN_FINANCEIRO; secrets/IA = ADMIN_TECNOLOGIA; tickets = SUPORTE/OPERAÇÕES
+- SEC-002: fallback hardcoded de ADMIN_PASSWORD removido (env obrigatório, fail-fast)
+- SEC-003: webhook fail-closed — 503 sem META_APP_SECRET, 403 sem assinatura HMAC-SHA256 válida; secret resolvido de env ou platform_settings; log do webhook sem PII
+- SEC-004: link-client valida posse do client_id (404 cross-office); lookups de client/process com filtro de office
+- SEC-005: +8 eventos de auditoria (user_login/logout, password_reset_*, client_deleted, alert_resolved, office_settings_updated, plan_changed)
+- P3: logout incrementa token_version (invalida sessão imediatamente); reset-password valida senha antes de consumir token
+- Performance: 13 novos índices (create_indexes) + N+1 eliminado em list_conversations e list_alerts
+- Produção: GET /api/health, exception handler global sem stack trace, backup diário (mongodump gzip → object storage, 7 cópias locais, cron 06:00 UTC, endpoint /api/cron/backup-database)
+- Deploy portátil: Dockerfile.backend, Dockerfile.frontend, docker-compose.yml, nginx.conf, .env.example, docs/DEPLOY_HOSTINGER.md
+- Entrega: docs/ENTREGA_FINAL.md (arquitetura, banco, APIs, envs, dependências, riscos, problemas, testes, checklist)
+- Testes webhook agora assinam payloads (tests/_webhook_sign.py); segredo de teste em platform_settings (NÃO é o secret real da Meta)
+
 ## FASE 6 — Planos, Consumo WhatsApp e Financeiro (10/09/2026) — VALIDADA
 - Validação formal (iteration_14): test_phase6_billing.py com 19 testes, 19/19 verdes; regressão global 162 passed / 6 skipped (token Meta 24h) / 0 failed; frontend confirmado via Playwright (/admin/whatsapp/pricing, /admin/relatorios consolidado, /whatsapp painel consumo)
 - PlanVersion: versionamento automático a cada alteração comercial (versão anterior encerrada, nunca sobrescrita); GET /admin/plans/{id}/versions
@@ -94,12 +108,11 @@ SOCIO_ADMIN (total), ADVOGADO_ASSOCIADO, ESTAGIARIO, SECRETARIA_ATENDIMENTO — 
 - P2: integrações de tribunais (fontes públicas/autenticadas), importação de PDF de processos, RAVI Inteligência (consulta conversacional ao advogado), RAVI Gestão (prazos, agenda, financeiro)
 
 ## Próximas tarefas
-1. FASE 7: Relatórios, Analytics, Health Check aprofundado, exportações CSV/PDF (P1) — aguardando escolha do usuário
-2. FASE 8: Suporte, Impersonation controlado, tickets administrativos (P1)
-3. Gateway de pagamento real (Stripe/Mercado Pago/Asaas) sobre a camada de abstração existente
-4. Usuário fornece credenciais Meta (META_APP_ID/META_APP_SECRET/META_CONFIG_ID) → ativar Embedded Signup real
+1. Go-live P0 (ver checklist em docs/ENTREGA_FINAL.md §9): Meta App real (META_APP_ID/SECRET/CONFIG_ID + App Review + webhook registrado), rotacionar ADMIN_PASSWORD e segredos de teste, System User Token no lugar do token de 24h
+2. Gateway de pagamento real (Stripe/Mercado Pago/Asaas) sobre a camada de abstração existente
+3. FASE 8: RAVI INTELIGÊNCIA (consulta conversacional ao advogado, resumo de andamentos) / RAVI GESTÃO (prazos, agenda)
 
-## Backlog menor (action items iteration_14 — opcionais, sem impacto funcional)
+## Backlog menor (action items iteration_15 — opcionais, sem impacto funcional)
 - Semântica do contador de alertas de consumo: hoje conta TODOS os eventos (inbound+outbound, faturáveis ou não) contra o message_limit — confirmar com produto se deve contar só outbound/faturáveis
 - Validar unicidade de fatura WhatsApp pendente por (office_id, período) antes de gerar nova
 - PATCH de tarifas Meta/RAVI sobrescreve in-place; planos versionam — considerar versionamento explícito de tarifas

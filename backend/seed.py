@@ -31,6 +31,19 @@ async def create_indexes():
     await db.login_attempts.create_index("email")
     await db.password_reset_requests.create_index("email")
     await db.password_reset_requests.create_index("created_at", expireAfterSeconds=900)
+    await db.processes.create_index([("office_id", 1), ("client_id", 1)])
+    await db.conversations.create_index([("office_id", 1), ("last_message_at", -1)])
+    await db.messages.create_index([("conversation_id", 1), ("created_at", 1)])
+    await db.alerts.create_index([("office_id", 1), ("status", 1)])
+    await db.audit_logs.create_index([("office_id", 1), ("created_at", -1)])
+    await db.admin_logs.create_index([("created_at", -1)])
+    await db.charges.create_index([("office_id", 1), ("status", 1)])
+    await db.subscriptions.create_index("office_id")
+    await db.tickets.create_index("office_id")
+    await db.whatsapp_usage_events.create_index([("office_id", 1), ("billing_period", 1)])
+    await db.whatsapp_usage_events.create_index("invoice_id")
+    await db.whatsapp_invoices.create_index([("office_id", 1), ("issue_date", -1)])
+    await db.plans.create_index("name")
 
 
 async def seed_platform():
@@ -39,7 +52,7 @@ async def seed_platform():
     if not await db.admin_users.find_one({"email": admin_email}):
         await db.admin_users.insert_one({
             "id": uuid.uuid4().hex, "name": "RAVI Admin", "email": admin_email,
-            "password_hash": hash_password(os.environ.get("ADMIN_PASSWORD", "Ravi@2026")),
+            "password_hash": hash_password(os.environ["ADMIN_PASSWORD"]),
             "role": "SUPER_ADMIN", "active": True, "totp_secret": None, "created_at": now_iso(),
         })
         logger.info("SUPER_ADMIN criado")
@@ -70,7 +83,7 @@ async def seed_platform():
 async def seed_demo():
     """Dados demo: Dr. Carlos Mendes / Silva Advocacia / Carlos Eduardo / processo 1001234-56.2025.8.26.0100."""
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@ravi.app").lower()
-    admin_password = os.environ.get("ADMIN_PASSWORD", "Ravi@2026")
+    admin_password = os.environ["ADMIN_PASSWORD"]
     existing = await db.users.find_one({"email": admin_email})
     if existing and not existing.get("demo_seeded"):
         return

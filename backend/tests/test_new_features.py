@@ -76,6 +76,10 @@ class TestInlineClient:
 
     def test_process_reuses_existing_client_by_phone(self, admin):
         phone = "(11) 97777-6666"
+        # limpeza idempotente: a suíte roda várias vezes sobre o mesmo banco
+        for c in admin.get(f"{API}/clients").json():
+            if c.get("phone_normalized") == "5511977776666":
+                admin.delete(f"{API}/clients/{c['id']}")
         # cria cliente primeiro
         r0 = admin.post(f"{API}/clients", json={"name": "TEST_Reuse", "phone": phone})
         assert r0.status_code == 200, r0.text
