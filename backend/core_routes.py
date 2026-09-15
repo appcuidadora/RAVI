@@ -42,10 +42,14 @@ async def dashboard_stats(user: dict = Depends(require_permission("dashboard")))
                  "precisam_de_voce": open_interventions, "tempo_economizado_min": round(minutes)}
     attention = await db.alerts.find({**f, "status": "open", "type": {"$in": ["intervention", "monitoring"]}},
                                      {"_id": 0}).sort("created_at", -1).to_list(8)
+    client_ids = list({a["client_id"] for a in attention if a.get("client_id")})
+    clients_map = {}
+    if client_ids:
+        clients_map = {c["id"]: c["name"] for c in await db.clients.find(
+            {"office_id": user["office_id"], "id": {"$in": client_ids}},
+            {"_id": 0, "id": 1, "name": 1}).to_list(100)}
     for a in attention:
-        if a.get("client_id"):
-            c = await db.clients.find_one({"id": a["client_id"]}, {"_id": 0, "name": 1})
-            a["client_name"] = c["name"] if c else None
+        a["client_name"] = clients_map.get(a.get("client_id"))
     hourly = await db.messages.aggregate([
         {"$match": f}, {"$group": {"_id": {"$substr": ["$created_at", 0, 13]}, "total": {"$sum": 1}}},
         {"$sort": {"_id": 1}}, {"$limit": 24}
@@ -75,13 +79,22 @@ async def list_clients(include_archived: bool = False, user: dict = Depends(requ
     if not include_archived:
         q["status"] = {"$ne": "arquivado"}
     clients = await db.clients.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+    client_ids = [c["id"] for c in clients]
+    procs_by_client = {}
+    if client_ids:
+        async for p in db.processes.find(
+                {"office_id": user["office_id"], "client_id": {"$in": client_ids}},
+                {"_id": 0, "id": 1, "client_id": 1, "numero_formatado": 1, "number": 1, "status": 1}):
+            procs_by_client.setdefault(p["client_id"], []).append(p)
+    user_ids = list({c["responsible_user_id"] for c in clients if c.get("responsible_user_id")})
+    users_map = {}
+    if user_ids:
+        users_map = {u["id"]: u["name"] for u in await db.users.find(
+            {"office_id": user["office_id"], "id": {"$in": user_ids}},
+            {"_id": 0, "id": 1, "name": 1}).to_list(200)}
     for c in clients:
-        c["processes"] = await db.processes.find(
-            {"office_id": user["office_id"], "client_id": c["id"]},
-            {"_id": 0, "id": 1, "numero_formatado": 1, "number": 1, "status": 1}).to_list(20)
-        if c.get("responsible_user_id"):
-            u = await db.users.find_one({"id": c["responsible_user_id"]}, {"_id": 0, "name": 1})
-            c["responsible_name"] = u["name"] if u else None
+        c["processes"] = procs_by_client.get(c["id"], [])[:20]
+        c["responsible_name"] = users_map.get(c.get("responsible_user_id"))
     return clients
 
 
